@@ -109,3 +109,6 @@ Docker Compose +  **K8s**
 - 前端 UI 优化（消息流式、引用文档展示）。
 - 加入最小评测 pipeline（retrieval precision/recall、输出参考率）。
 - 完成一个可 demo 的 end-to-end 系统。
+
+开启后端：
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
