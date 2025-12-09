@@ -56,18 +56,18 @@ class LLMAgent():
         self.turn_id = 0
         self.history = History()
         self.total_histories: Dict[int, History] = {}
-        self.token_used = 0
         self.token_limit = 128000
         self.THRESHOLD = 0.001
         
         
     def start_new_turn(self):
 
+        self.total_histories[self.turn_id] = self.history # 保存当前对话历史
+
+        # 开始新的对话
         self.turn_id += 1
         self.current_history = History()
         self.total_histories[self.turn_id] = self.current_history
-        self.token_used = 0
-        self.current_history.token_used = self.token_used
 
     def delete_turn(self, id: int):
         if id in self.total_histories:
@@ -103,7 +103,6 @@ class LLMAgent():
 
         assistant_message = Message(role="assistant", content=response["messages"][-1].content, turn_id=self.turn_id)
         self.current_history.add(assistant_message)
-        self.token_used = response['messages'][1].response_metadata['token_usage']['total_tokens'] # 获取总的 token 使用量，默认为当前值
-        self.current_history.token_used = self.token_used
+        self.current_history.token_used = response['messages'][1].response_metadata['token_usage']['total_tokens'] # 获取总的 token 使用量，默认为当前值
 
         return response["messages"][-1].content
