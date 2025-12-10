@@ -103,6 +103,31 @@ class LLMAgent():
 
         assistant_message = Message(role="assistant", content=response["messages"][-1].content, turn_id=self.turn_id)
         self.current_history.add(assistant_message)
-        self.current_history.token_used = response['messages'][1].response_metadata['token_usage']['total_tokens'] # 获取总的 token 使用量，默认为当前值
+
+        token_usage = self._extract_token_usage(response)
+        if token_usage is not None:
+            self.current_history.token_used = token_usage
+            self.total_histories[self.turn_id] = self.current_history
 
         return response["messages"][-1].content
+
+    def _extract_token_usage(self, response: Dict[str, Any]) -> Optional[int]:
+        """Safely extract token usage from LangChain response."""
+        messages = response.get("messages")
+        if not isinstance(messages, list):
+            return None
+
+        for message in reversed(messages):
+            meta = getattr(message, "response_metadata", None)
+            if isinstance(meta, dict):
+                token_usage = meta.get("token_usage", {}).get("total_tokens")
+                if token_usage is not None:
+                    return token_usage
+
+        usage = response.get("usage") or response.get("response_metadata", {})
+        if isinstance(usage, dict):
+            token_usage = usage.get("token_usage", {}).get("total_tokens")
+            if token_usage is not None:
+                return token_usage
+
+        return None

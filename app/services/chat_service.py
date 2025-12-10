@@ -22,3 +22,6 @@ class ChatService:
     
     async def show_all_turn_data(self):
         return await self.llm.show_all_turn_data()
+    
+    async def get_current_turn_id(self):
+        return self.llm.agent.turn_id
