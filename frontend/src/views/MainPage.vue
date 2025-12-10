@@ -32,7 +32,7 @@ import Chat from '@/components/Chat.vue'
 
 .panel--left {
   flex: 0 0 20%;
-  background-color: #262626;
+  background-color: #414141;
   color: rgb(203, 203, 203);
 }
 

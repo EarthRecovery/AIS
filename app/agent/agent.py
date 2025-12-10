@@ -22,6 +22,7 @@ class History:
     def __init__(self):
         self.messages: list[Message] = []
         self.token_used: int = 0
+        self.summary: str = ""
 
     def add(self, msg: Message):
         self.messages.append(msg)
@@ -54,15 +55,26 @@ class LLMAgent():
         )
 
         self.turn_id = 0
-        self.history = History()
+        self.current_history: Optional[History] = None
         self.total_histories: Dict[int, History] = {}
         self.token_limit = 128000
         self.THRESHOLD = 0.001
+        # 初始化第一个对话
+        self.start_new_turn()
+
+    def change_to_turn(self, id: int):
+        if id in self.total_histories:
+            self.turn_id = id
+            self.current_history = self.total_histories[id]
+            return True
+        else:
+            return False
         
         
     def start_new_turn(self):
-
-        self.total_histories[self.turn_id] = self.history # 保存当前对话历史
+        if self.current_history is not None:
+            # 保存当前对话历史
+            self.total_histories[self.turn_id] = self.current_history
 
         # 开始新的对话
         self.turn_id += 1
@@ -75,7 +87,6 @@ class LLMAgent():
             return True
         else:
             return False
-        
     
     def show_all_turn_data(self):
         return self.total_histories
@@ -104,12 +115,20 @@ class LLMAgent():
         assistant_message = Message(role="assistant", content=response["messages"][-1].content, turn_id=self.turn_id)
         self.current_history.add(assistant_message)
 
-        token_usage = self._extract_token_usage(response)
-        if token_usage is not None:
-            self.current_history.token_used = token_usage
-            self.total_histories[self.turn_id] = self.current_history
+        self.update_history_summary(self.turn_id, user_input) # 更新为最新的用户输入
+        token_used = self._extract_token_usage(response)
+        if token_used is not None:
+            self.update_history_token_usage(self.turn_id, token_used)
 
         return response["messages"][-1].content
+    
+    def update_history_summary(self, turn_id: int, summary: str):
+        if turn_id in self.total_histories:
+            self.total_histories[turn_id].summary = summary
+
+    def update_history_token_usage(self, turn_id: int, token_used: int):
+        if turn_id in self.total_histories:
+            self.total_histories[turn_id].token_used = token_used
 
     def _extract_token_usage(self, response: Dict[str, Any]) -> Optional[int]:
         """Safely extract token usage from LangChain response."""

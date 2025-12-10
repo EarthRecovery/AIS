@@ -1,10 +1,6 @@
 from fastapi import Depends
 from app.infra.llm_client import LLMClient
-from functools import lru_cache
-
-@lru_cache()
-def get_llm_client():
-    return LLMClient()
+from app.services.deps import get_llm_client
 
 class ChatService:
     def __init__(self, llm: LLMClient = Depends(get_llm_client)):
@@ -25,3 +21,5 @@ class ChatService:
     
     async def get_current_turn_id(self):
         return self.llm.agent.turn_id
+    
+    

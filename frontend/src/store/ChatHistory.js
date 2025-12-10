@@ -40,10 +40,8 @@ export const useChatHistoryStore = defineStore('chatHistory', {
     async updateHistoryByTurnId(turn_id) {
       const history_res = await getHistoryByTurnId(turn_id) //获取指定turn_id的对话历史
       this.clearHistory()
+      console.log("Fetched history for turn_id", turn_id, ":", history_res.data.messages)
 
-      console.log(history_res)
-
-      // 正确字段是 messages，不是 history
       for (const msg of history_res.data.messages) {
         this.addMessage(msg.role, msg.content, turn_id)
       }

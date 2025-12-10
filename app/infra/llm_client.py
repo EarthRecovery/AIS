@@ -4,7 +4,7 @@ class LLMClient:
     
     def __init__(self):
         self.agent = LLMAgent()
-        self.agent.start_new_turn()
+        # self.agent.start_new_turn()
 
     async def chat(self, message: str):
         # 真实情况这里会调 OpenAI / vLLM
@@ -20,3 +20,7 @@ class LLMClient:
     
     async def show_all_turn_data(self):
         return self.agent.show_all_turn_data()
+    
+    async def change_to_turn(self, turn_id: int):
+        result = self.agent.change_to_turn(turn_id)
+        return result

@@ -13,3 +13,7 @@ export function getCurrentTurnId() {
 export function getHistoryByTurnId(turn_id) {
   return request.get(`/chat/history/${turn_id}`)
 }
+
+export function startNewChat() {
+  return request.get('/chat/new')
+}

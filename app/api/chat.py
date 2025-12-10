@@ -1,3 +1,4 @@
+from app.services.turn_service import TurnService
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from app.services.chat_service import ChatService
@@ -15,7 +16,7 @@ async def chat(req: ChatRequest, svc: ChatService = Depends()):
     reply = await svc.chat(req.message)
     return ChatResponse(reply=reply)
 
-@router.post("/chat/new")
+@router.get("/chat/new")
 async def start_new_chat(svc: ChatService = Depends()):
     result = await svc.start_new_chat()
     return {"success": result}
