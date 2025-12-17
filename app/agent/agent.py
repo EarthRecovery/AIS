@@ -1,8 +1,8 @@
 
+from app.agent.middleware.rag import rag_context_middleware
 from langchain.agents import create_agent, AgentState
 from langgraph.checkpoint.memory import InMemorySaver
 from langchain_core.runnables import RunnableConfig
-from langchain.agents.middleware import SummarizationMiddleware
 from typing import Any
 from dotenv import load_dotenv
 from dataclasses import dataclass
@@ -41,16 +41,13 @@ class History:
 class LLMAgent():
 
     def __init__(self):
-        load_dotenv()
+        
         self.agent = create_agent(
             "gpt-4.1",
             tools=[],
-            middleware=[SummarizationMiddleware(
-                model="gpt-4o-mini",
-                # trigger=("tokens", 4000),
-                # keep=("messages", 20),
-            ),
-        ],
+            # middleware=[
+            #     rag_context_middleware,
+            # ],
             checkpointer=InMemorySaver(),
         )
 

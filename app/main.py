@@ -1,10 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+load_dotenv()
 
 from app.api.chat import router as chat_router
 from app.api.turn import router as turn_router
 
 app = FastAPI(title="Minimal Layered FastAPI")
+
 
 app.add_middleware(
     CORSMiddleware,

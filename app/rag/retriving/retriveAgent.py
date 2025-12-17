@@ -1,6 +1,6 @@
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.documents import Document
-from rag.models.openai import OpenAIModel
+from app.rag.models.openai import OpenAIModel
 from langgraph.checkpoint.memory import InMemorySaver
 
 #Agent 是一个检索增强生成（RAG）系统的组件，负责从向量存储中检索相关文档，并基于这些文档生成回答。
@@ -10,8 +10,7 @@ class RetrieveAgent:
 
     # 使用向量存储模型检索与查询最相关的文档。k 指定要检索的文档数量。
     def retrieve(self, query: str, k: int = 3):
-        retriever = self.model.openai_vector_store_model.as_retriever(search_type="similarity", search_kwargs={"k": k})
-        docs = retriever.invoke(query)
+        docs = self.model.openai_vector_store_model.similarity_search(query, k=k)
         return docs
 
     # 输入查询，检索相关文档，并基于这些文档生成回答。
