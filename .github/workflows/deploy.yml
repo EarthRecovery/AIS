@@ -16,7 +16,7 @@ jobs:
         uses: appleboy/ssh-action@v1.0.0
         env:
           REMOTE_PATH: /home/${{ secrets.EC2_USER }}/ais
-          BRANCH: master
+          BRANCH: main
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
