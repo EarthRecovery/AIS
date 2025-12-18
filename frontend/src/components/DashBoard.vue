@@ -1,9 +1,14 @@
 <template>
   <div class="page">
     <div class="upper">
-        <n-button type="primary" @click="handleStartNewChat" :loading="isStarting" class="new_chat_button">
+      <div class="upper_actions">
+        <n-button type="primary" @click="handleOpenSettings" class="upper_button">
+          设置
+        </n-button>
+        <n-button type="primary" @click="handleStartNewChat" :loading="isStarting" class="upper_button">
           新建对话
         </n-button>
+      </div>
     </div>
     <div class="history">
         <div class="history_header">历史记录</div>
@@ -34,6 +39,11 @@
           </div>
         </n-scrollbar>
     </div>
+    <SettingsPanel
+      :visible="showSettings"
+      @close="handleCloseSettings"
+      @submit="handleSubmitSettings"
+    />
   </div>
 </template>
 
@@ -42,12 +52,14 @@ import { computed, onMounted, ref } from 'vue'
 import { NScrollbar, NButton } from 'naive-ui'
 import { useTurnHistoryStore } from '@/store/TurnHistory'
 import { useChatHistoryStore } from '@/store/ChatHistory'
+import SettingsPanel from './SettingsPanel.vue'
 
 const turnHistoryStore = useTurnHistoryStore()
 const chatHistoryStore = useChatHistoryStore()
 const histories = computed(() => turnHistoryStore.turn_history)
 const isStarting = ref(false)
 const isSwitching = ref(false)
+const showSettings = ref(false)
 const activeTurnId = computed(() => chatHistoryStore.turn_id)
 
 const loadHistory = async () => {
@@ -82,6 +94,19 @@ const handleSelectTurn = async (turnId) => {
   }
 }
 
+const handleOpenSettings = () => {
+  showSettings.value = true
+}
+
+const handleCloseSettings = () => {
+  showSettings.value = false
+}
+
+const handleSubmitSettings = (payload) => {
+  console.log('settings submit', payload)
+  showSettings.value = false
+}
+
 onMounted(() => {
   loadHistory()
 })
@@ -95,12 +120,23 @@ onMounted(() => {
   height: 100vh;
 }
 .upper {
-  flex: 0 0 30%;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding: 0 24px;
+  flex: 0 0 auto;
+  padding: 24px;
 }
+.upper_actions {
+  display: flex;
+  width: 100%;
+  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.upper_button {
+  flex: 1 1 180px;
+  max-width: 240px;
+  height: 44px;
+  font-size: 16px;
+}
+
 .history {
   flex: 0 0 70%;
   overflow: hidden;

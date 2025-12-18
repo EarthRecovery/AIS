@@ -4,12 +4,6 @@ from app.services.turn_service import TurnService
 
 router = APIRouter()
 
-class ChatRequest(BaseModel):
-    message: str
-
-class ChatResponse(BaseModel):
-    reply: str
-
 @router.get("/turns/history")
 async def get_turn_list(svc: TurnService = Depends()):
     turn_list = await svc.get_turn_list()
