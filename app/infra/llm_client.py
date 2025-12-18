@@ -7,7 +7,6 @@ class LLMClient:
         # self.agent.start_new_turn()
 
     async def chat(self, message: str):
-        # 真实情况这里会调 OpenAI / vLLM
         return self.agent.get_response(message)
     
     async def start_new_chat(self):

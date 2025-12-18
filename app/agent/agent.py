@@ -45,9 +45,9 @@ class LLMAgent():
         self.agent = create_agent(
             "gpt-4.1",
             tools=[],
-            # middleware=[
-            #     rag_context_middleware,
-            # ],
+            middleware=[
+                rag_context_middleware,
+            ],
             checkpointer=InMemorySaver(),
         )
 
