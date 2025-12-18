@@ -44,3 +44,4 @@ jobs:
             npm ci
             npm run build
             sudo systemctl restart ais-frontend
+            
