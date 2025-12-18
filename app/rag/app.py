@@ -6,7 +6,7 @@ class RagApp:
     def __init__(self):
         self.is_active = True
         self.model =  OpenAIModel()
-        self.persist_dir = "/home/kaslana/AIS/data/chroma_db"
+        self.persist_dir = "./data/chroma_db"
 
     def deactivate(self):
         self.is_active = False

@@ -4,7 +4,7 @@ import hashlib
 
 class VectorStore:
     def __init__(self, embedding_model, collection_name: str = "default_collection", persist_directory: str | None = None):
-        self.persist_dir = persist_directory or "/home/kaslana/AIS/data/chroma_db"
+        self.persist_dir = persist_directory or "./data/chroma_db"
         self.collection_name = collection_name
         self.store = Chroma(
             embedding_function=embedding_model,
