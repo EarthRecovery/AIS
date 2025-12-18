@@ -28,7 +28,6 @@ jobs:
             git fetch Origin
             git checkout "$BRANCH"
             git reset --hard Origin/"$BRANCH"
-            git clean -fd -e venv
 
             echo "Activating venv..."
 
