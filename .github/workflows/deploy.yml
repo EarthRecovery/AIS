@@ -1,0 +1,30 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Sync to EC2 host
+        uses: appleboy/ssh-action@v1.0.0
+        env:
+          REMOTE_PATH: /home/${{ secrets.EC2_USER }}/ais
+          BRANCH: master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          envs: REMOTE_PATH,BRANCH
+          script: |
+            set -euo pipefail
+            cd "$REMOTE_PATH"
+            git fetch Origin "$BRANCH"
+            git checkout "$BRANCH"
+            git pull --ff-only Origin "$BRANCH"
