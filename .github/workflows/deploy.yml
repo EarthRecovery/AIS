@@ -25,9 +25,9 @@ jobs:
             cd "$REMOTE_PATH"
 
             echo "Updating code..."
-            git fetch origin "$BRANCH"
+            git fetch Origin "$BRANCH"
             git checkout "$BRANCH"
-            git pull --ff-only origin "$BRANCH"
+            git pull --ff-only Origin "$BRANCH"
 
             echo "Activating venv..."
             source venv/bin/activate
