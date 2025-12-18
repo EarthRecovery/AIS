@@ -28,14 +28,13 @@ jobs:
             git fetch Origin
             git checkout "$BRANCH"
             git reset --hard Origin/"$BRANCH"
-            git clean -fd
+            git clean -fd -e venv
 
             echo "Activating venv..."
-            source venv/bin/activate
 
             echo "Upgrading pip & installing deps..."
-            python -m pip install --upgrade pip
-            pip install -r requirements.txt
+            /home/ec2-user/ais/venv/bin/python -m pip install --upgrade pip
+            /home/ec2-user/ais/venv/bin/pip install -r requirements.txt
 
             echo "Restart backend..."
             sudo systemctl restart ais-backend
