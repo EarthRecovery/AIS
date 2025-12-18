@@ -25,9 +25,10 @@ jobs:
             cd "$REMOTE_PATH"
 
             echo "Updating code..."
-            git fetch Origin "$BRANCH"
+            git fetch Origin
             git checkout "$BRANCH"
-            git pull --ff-only Origin "$BRANCH"
+            git reset --hard Origin/"$BRANCH"
+            git clean -fd
 
             echo "Activating venv..."
             source venv/bin/activate
@@ -44,4 +45,4 @@ jobs:
             npm ci
             npm run build
             sudo systemctl restart ais-frontend
-            
+
