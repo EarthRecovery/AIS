@@ -9,21 +9,19 @@ import requests
 # DocumentLoader 是一个用于从指定 URL 加载网页内容的类，提取其中的文本段落并返回为文档列表。
 class DocumentLoader:
 
-    def __init__(self, url: str):
-        self.url = url
+    def __init__(self):
+        pass
 
     # 从指定 URL 加载网页内容，提取所有段落文本并返回文档列表。
-    def load_from_url(self):
-        if "moegirl" in self.url:
-            title = self.url.split("/")[-1]
-            docs = self.load_from_moegirl(title=title)
-        else:
-            docs = self.web_loader.load()
-        
-        return docs
+    def load_from_url(self, url: str = None):
+        pass
     
     def web_loader(self):
         pass
+
+    def load_from_channel(self, context: str, channel: str):
+        if channel == "moegirl":
+            return self.load_from_moegirl(context)
     
     def load_from_moegirl(self, title: str = None):
         headers = {
@@ -36,7 +34,7 @@ class DocumentLoader:
         }
         params = {
             "action": "parse",
-            "page": "爱城华恋",
+            "page": title,
             "prop": "text",
             "format": "json"
         }
