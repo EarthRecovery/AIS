@@ -1,4 +1,5 @@
 # app/agent/middleware/rag_context.py
+from tokenize import String
 from langchain.agents.middleware import AgentState, before_model
 from app.rag.models.openai import OpenAIModel
 from langchain_core.messages import SystemMessage
@@ -20,3 +21,13 @@ def rag_context_middleware(state: AgentState, runtime):
         return None
     ctx = "\n\n".join(d.page_content for d in docs)
     return {"messages": [SystemMessage(content=f"Use the retrieved context:\n{ctx}")]}
+
+def rag_run(messages: list) -> str:
+    last_user = next((m for m in reversed(messages) if m.get("role") == "user"), None)
+    if not last_user:
+        return None
+    docs = vector_store.similarity_search(last_user.get("content"), k=3)
+    if not docs:
+        return None
+    ctx = "\n\n".join(d.page_content for d in docs)
+    return ctx

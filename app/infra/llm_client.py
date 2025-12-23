@@ -9,6 +9,10 @@ class LLMClient:
     async def chat(self, message: str):
         return self.agent.get_response(message)
     
+    async def chat_stream(self, message: str):
+        async for chunk in self.agent.get_response_astream(message):
+            yield chunk
+    
     async def start_new_chat(self):
         self.agent.start_new_turn()
         return True

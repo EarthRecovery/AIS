@@ -10,6 +10,10 @@ class ChatService:
         reply = await self.llm.chat(msg)
         return reply
     
+    async def chat_stream(self, msg: str):
+        async for chunk in self.llm.chat_stream(msg):
+            yield chunk
+    
     async def start_new_chat(self):
         return await self.llm.start_new_chat()
     

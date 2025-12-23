@@ -1,5 +1,4 @@
-
-from app.agent.middleware.rag import rag_context_middleware
+from app.agent.middleware.rag import rag_context_middleware, rag_run
 from langchain.agents import create_agent, AgentState
 from langgraph.checkpoint.memory import InMemorySaver
 from langchain_core.runnables import RunnableConfig
@@ -8,6 +7,7 @@ from dotenv import load_dotenv
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
 import time
+from langchain_openai import ChatOpenAI
 
 @dataclass
 class Message:
@@ -41,9 +41,13 @@ class History:
 class LLMAgent():
 
     def __init__(self):
+        self.llm = ChatOpenAI(
+            model="gpt-4.1",
+            streaming=True,
+        )
         
         self.agent = create_agent(
-            "gpt-4.1",
+            self.llm,
             tools=[],
             middleware=[
                 rag_context_middleware,
@@ -118,6 +122,33 @@ class LLMAgent():
             self.update_history_token_usage(self.turn_id, token_used)
 
         return response["messages"][-1].content
+    
+    async def get_response_astream(self, user_input: str):
+        temp_message = Message(role="user", content=user_input, turn_id=self.turn_id)
+        self.current_history.add(temp_message)
+
+        try:
+            # Build messages from full history (includes current user)
+            messages = self.current_history.to_agent_format()
+
+            # Prepend RAG context if available
+            context = rag_run(messages)
+            if context:
+                messages = [{"role": "system", "content": f"Use the retrieved context:\n{context}"}] + messages
+
+            assistant_content = ""
+            async for chunk in self.llm.astream(messages):
+                content = chunk.content
+                assistant_content += content
+                yield content
+
+            assistant_message = Message(role="assistant", content=assistant_content, turn_id=self.turn_id)
+            self.current_history.add(assistant_message)
+        except Exception as e:
+            print(f"Error preparing agent input: {e}")
+            self.current_history.messages.pop()  # Remove the last user message
+            yield "Sorry, there was an error processing your request."
+            return
     
     def update_history_summary(self, turn_id: int, summary: str):
         if turn_id in self.total_histories:

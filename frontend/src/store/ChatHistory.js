@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { sendChatMessage, getCurrentTurnId, getHistoryByTurnId } from '@/api/chat'
+import { sendChatMessage, getCurrentTurnId, getHistoryByTurnId, streamChatMessage } from '@/api/chat'
 
 export const useChatHistoryStore = defineStore('chatHistory', {
   state: () => ({
@@ -21,14 +21,23 @@ export const useChatHistoryStore = defineStore('chatHistory', {
       // 2. 把用户消息加入历史
       this.addMessage('user', content, this.turn_id)
 
-      // 3. 发送到后端
-      const res = await sendChatMessage(content)
+      // 3. 发送到后端（流式）
+      // 先占位 assistant 消息，后续增量填充
+      const assistantIndex = this.chatHistory.length
+      this.addMessage('assistant', '', this.turn_id)
 
-      // 假设后端返回 { reply: "...", token_used: ... }
-      const reply = res.data.reply
-
-      // 4. assistant 回复加入历史
-      this.addMessage('assistant', reply, this.turn_id)
+      try {
+        const fullReply = await streamChatMessage(content, (delta) => {
+          // 追加增量
+          this.chatHistory[assistantIndex].content += delta
+        })
+        // 确保最终内容完整
+        this.chatHistory[assistantIndex].content = fullReply
+      } catch (err) {
+        // 失败时写入错误提示
+        this.chatHistory[assistantIndex].content = '对话失败，请重试'
+        console.error('Stream chat failed', err)
+      }
     },
 
     async getCurrentTurnId() {
