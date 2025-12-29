@@ -69,3 +69,4 @@ export const useChatHistoryStore = defineStore('chatHistory', {
     },
   }
 })
+
