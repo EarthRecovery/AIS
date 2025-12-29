@@ -1,114 +1,47 @@
 # Target
 
-### Title
+### Persona-based Conversational Agents 人格化对话智能体 (or named project AIS)
 
-ACG-Knowledge-Explorer: A conversational AI agent that answers questions about anime worlds, characters, relationships, and storylines in English
+### target
 
-### short-term target
+This project focuses on persona-grounded dialogue agents with persistent character traits.
+We aim to build an agent that maintains long-term memory and persona consistency, generates character-conditioned dialogue, and supports tool invocation and multi-modal actions, such as Live2D-based avatar behaviors, during interactive sessions.
 
-Q&A(Easiest way)
+Additionally, the agent is designed to adapt its behaviors and personality traits through ongoing dialogue, enabling controlled and experience-driven character evolution while preserving core persona constraints.
 
-reasoning
+本项目聚焦于具有人格设定约束的对话智能体，强调持久且一致的角色特征。
+我们的目标是构建一个能够维持长期记忆与人格一致性的智能体，使其能够生成受角色条件约束的对话内容，并在交互过程中支持工具调用与多模态动作，例如基于 Live2D 的虚拟形象行为。
 
-### Long-term target
+此外，智能体将能够基于持续的对话交互对其行为模式与性格特征进行调整，在保持核心人格设定不变的前提下，实现可控的人格演化
 
-multiple input(Website, image...)
+### framework
 
-Multiple agent(draw graph/tables/search from website...)
+backend: FastAPI + async SQLAlchemy + Alembic, layered routers/services/models under `app/`; LangChain/LangGraph-based RAG with Chroma in `app/rag`; JWT auth helpers in `app/security`.
 
-real-time conversation
+frontend: Vite + Vue 3 + Pinia + Naive UI (`frontend/`), using Axios to call the FastAPI backend.
 
-Chinese support
+agent: gpt-4.1 + RAG + langchain/langgraph
 
-### Framework
+### features: 功能特性
+1. Agent Invocation and Conversational Interaction
+智能体调用与多轮对话交互
+2. Streaming Output of Final Responses
+最终回复的实时流式输出
+3. End-to-End Backend and Frontend Deployment
+端到端的前后端一体化部署
+4. RAG for long-term memory
+基于RAG的长期记忆机制
+5. Persistent data storage
+对话记录与智能体状态的持久化数据存储
 
-#### LLM/fineturn
+### future plans: 未来规划
+1. Security and Safety Validation
+安全性与可靠性校验机制
+2. Advanced Prompt Engineering for Persona Consistency and Control
+用于人格一致性与可控性的高级 Prompt 工程
+3. Multi-modal Actions and Live2D Avatar Integration
+多模态动作支持与 Live2D 虚拟形象集成
+4. more tool calls (like internet searching)
+更丰富的工具调用能力（如互联网搜索等）
 
-
-
-#### RAG/Neo4j
-
-
-
-#### Server/API
-
-
-
-#### Frontend
-
-
-
-### Framework & Stack
-
-#### LLM / finetune and reasoning
-
-HuggingFace Transformers + PEFT（LoRA/QLoRA）/ TRL（SFT、PPO/GRPO）
-
-**vLLM**（PagedAttention、continuous batching）
-
-bitsandbytes（NF4/FP4）/ AWQ / GPTQ / EXL2
-
-vLLM OpenAI-compatible server
-
-#### RAG / Neo4j
-
-Neo4j
-
-**Spring AI** 
-
-Postgres + **pgvector**
-
-先向量检索（Top-k）→ 图谱查询（限定实体/关系）→ 合并上下文 → 重排 → 生成（带引用）
-
-#### Server / API
-
-FastAPI
-
-**Spring Boot + Spring AI**
-
-Redis
-
-Docker Compose +  **K8s**
-
-
-
-### 路线
-
-**1. RAG/知识图谱**
-
-- 建立向量库（pgvector/Qdrant）+ Neo4j 图谱 → 搭一个基本问答系统。
-- 用现成的通用 LLM（如 LLaMA/Qwen/Mistral）调用 RAG pipeline，立刻能验证效果
-
-
-
-2. 模型微调
-
-3. 后端开发
-4. 前端开发
-
-### **第 1 阶段：基础打通（2–3 周）**
-
-- 数据预处理 → pgvector & Neo4j 入库。
-- FastAPI + Spring AI + 前端（Streamlit/Next.js）打通最小对话链路。
-- 本地 4070Ti 部署量化模型，跑通小规模对话。
-
-### **第 2 阶段：模型微调（2–3 周）**
-
-- 在服务器（4×A100-80G）做一次 SFT 或 LoRA/QLoRA。
-- 尝试 adapter 部署在本地（量化）和服务器（全精度）。
-- 基本评估：模型是否比基础版更符合领域任务。
-
-### **第 3 阶段：推理优化 + Agent（1–2 周）**
-
-- vLLM 部署（continuous batching + KV cache）。
-- 增加 Redis 缓存、请求限流。
-- Agent 工具调用（Neo4j 查询、向量检索、函数调用）。
-
-### **第 4 阶段：打磨与展示（1–2 周）**
-
-- 前端 UI 优化（消息流式、引用文档展示）。
-- 加入最小评测 pipeline（retrieval precision/recall、输出参考率）。
-- 完成一个可 demo 的 end-to-end 系统。
-
-开启后端：
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+website: http://18.170.57.90:5173/

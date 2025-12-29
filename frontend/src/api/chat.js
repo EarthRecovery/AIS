@@ -1,19 +1,30 @@
 import request from '@/utils/request'
 const BASE_URL = request.defaults.baseURL || ''
 
-export function sendChatMessage(message) {
+export function sendChatMessage(message, history_id) {
   return request.post('/chat', {
-    message
+    message,
+    history_id,
   })
 }
 
-export async function streamChatMessage(message, onChunk) {
+export async function streamChatMessage(message, history_id, onChunk) {
+  const token = localStorage.getItem('ais_token')
+  if (!token) {
+    window.location.href = '/login'
+    throw new Error('Not authenticated')
+  }
+  if (!message || !`${message}`.trim()) {
+    throw new Error('message is required')
+  }
   const resp = await fetch(`${BASE_URL}/chat/stream`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ message })
+    // backend ChatRequest expects { message, history_id }
+    body: JSON.stringify({ message, history_id }),
   })
 
   if (!resp.ok || !resp.body) {
@@ -53,12 +64,8 @@ export async function streamChatMessage(message, onChunk) {
   return fullText
 }
 
-export function getCurrentTurnId() {
-  return request.get('/chat/turnid')
-}
-
-export function getHistoryByTurnId(turn_id) {
-  return request.get(`/chat/history/${turn_id}`)
+export function getHistoryByHistoryId(history_id) {
+  return request.get(`/chat/history/${history_id}`)
 }
 
 export function startNewChat() {

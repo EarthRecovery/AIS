@@ -11,3 +11,8 @@ def get_llm_client():
 @lru_cache()
 def get_rag_client():
     return RAGClient()
+
+@lru_cache()
+def get_chat_service():
+    from app.services.chat_service import ChatService
+    return ChatService()

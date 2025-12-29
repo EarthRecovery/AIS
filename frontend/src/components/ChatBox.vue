@@ -33,10 +33,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useChatHistoryStore } from '@/store/ChatHistory'
+import { useTurnHistoryStore } from '@/store/TurnHistory'
 
 const chatHistoryStore = useChatHistoryStore()
+const turnHistoryStore = useTurnHistoryStore()
 
 const messages = computed(() => chatHistoryStore.chatHistory)
 
@@ -50,13 +52,27 @@ const normalizeRole = (role) => {
 
 const roleLabel = (role) => (normalizeRole(role) === 'assistant' ? 'AI' : '我')
 
+// 先确保 turn 历史加载，再同步首个 history 到 chat
 onMounted(async () => {
-  if (typeof chatHistoryStore.init === 'function') {
-    await chatHistoryStore.init()
-  } else if (typeof chatHistoryStore.getCurrentTurnId === 'function') {
-    await chatHistoryStore.getCurrentTurnId()
+  if (!turnHistoryStore.turn_history.length) {
+    await turnHistoryStore.fetchTurnHistory()
   }
 })
+
+watch(
+  () => turnHistoryStore.turn_history,
+  async (list) => {
+    if (list && list.length) {
+      const first = list[0]
+      const firstId = first?.id ?? first?.history_id ?? first?.turn_id
+      if (firstId && chatHistoryStore.history_id !== firstId) {
+        chatHistoryStore.history_id = firstId
+        await chatHistoryStore.updateHistoryByHistoryId(firstId)
+      }
+    }
+  },
+  { immediate: true }
+)
 </script>
 
 <style scoped>

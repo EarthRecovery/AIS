@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { getTurnHistory, agentChangeToTurn } from '@/api/turn'
+import { getTurnHistory} from '@/api/turn'
 import { startNewChat } from '@/api/chat'
 import { useChatHistoryStore } from '@/store/ChatHistory'
 
@@ -25,13 +25,9 @@ export const useTurnHistoryStore = defineStore('turnHistory', {
     },
 
     async changeToTurn(turn_id) {
-      if (!this.turn_history.find(turn => turn.turn_id === turn_id)) {
-        throw new Error(`Turn ID ${turn_id} not found in turn history`)
-      }
-      await agentChangeToTurn(turn_id)
       await this.fetchTurnHistory()
       const chatHistoryStore = useChatHistoryStore()
-      await chatHistoryStore.updateHistoryByTurnId(turn_id)
+      await chatHistoryStore.updateHistoryByHistoryId(turn_id)
     }
   }
 })

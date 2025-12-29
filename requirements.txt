@@ -8,6 +8,11 @@ langchain-core==1.0.2
 langchain-openai==1.0.1
 langchain-text-splitters==1.0.0
 langgraph==1.0.2
+SQLAlchemy>=2.0
+aiomysql
+alembic
+email-validator
+pyjwt
 pydantic==2.12.3
 python-dotenv==1.2.1
 readability-lxml==0.8.4.1

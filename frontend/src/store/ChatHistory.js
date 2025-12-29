@@ -1,15 +1,15 @@
 import { defineStore } from 'pinia'
-import { sendChatMessage, getCurrentTurnId, getHistoryByTurnId, streamChatMessage } from '@/api/chat'
+import { sendChatMessage, getHistoryByHistoryId, streamChatMessage } from '@/api/chat'
 
 export const useChatHistoryStore = defineStore('chatHistory', {
   state: () => ({
     chatHistory: [],
     token_used: 0,
-    turn_id: 0
+    history_id: -1
   }),
   actions: {
-    addMessage(role, content, turn_id) {
-      this.chatHistory.push({ role, content, turn_id })
+    addMessage(role, content, history_id) {
+      this.chatHistory.push({ role, content, history_id })
     },
     clearHistory() {
       this.chatHistory = []
@@ -19,15 +19,15 @@ export const useChatHistoryStore = defineStore('chatHistory', {
     async sendMessage(content) {
 
       // 2. 把用户消息加入历史
-      this.addMessage('user', content, this.turn_id)
+      this.addMessage('user', content, this.history_id)
 
       // 3. 发送到后端（流式）
       // 先占位 assistant 消息，后续增量填充
       const assistantIndex = this.chatHistory.length
-      this.addMessage('assistant', '', this.turn_id)
+      this.addMessage('assistant', '', this.history_id)
 
       try {
-        const fullReply = await streamChatMessage(content, (delta) => {
+        const fullReply = await streamChatMessage(content, this.history_id, (delta) => {
           // 追加增量
           this.chatHistory[assistantIndex].content += delta
         })
@@ -40,28 +40,32 @@ export const useChatHistoryStore = defineStore('chatHistory', {
       }
     },
 
-    async getCurrentTurnId() {
-      const res = await getCurrentTurnId()
-      this.turn_id = res.data.turn_id
-      return this.turn_id
+    async getCurrentHistoryId() {
+      if (this.history_id !== -1) {
+        return this.history_id
+      }else{
+        
+      }
     },
 
-    async updateHistoryByTurnId(turn_id) {
-      const history_res = await getHistoryByTurnId(turn_id) //获取指定turn_id的对话历史
+    async updateHistoryByHistoryId(history_id) {
+      const history_res = await getHistoryByHistoryId(history_id) //获取指定history_id的对话历史
+      console.log("Fetched history for history_id", history_id, history_res)
       this.clearHistory()
-      console.log("Fetched history for turn_id", turn_id, ":", history_res.data.messages)
 
-      for (const msg of history_res.data.messages) {
-        this.addMessage(msg.role, msg.content, turn_id)
+      if (history_res.data.length != 0) {
+        for (const msg of history_res.data) {
+          this.addMessage(msg.role, msg.content, history_id)
+        }
       }
 
       this.token_used = history_res.data.token_used
-      this.turn_id = turn_id
+      this.history_id = history_id
     },
 
     async init() {
-      const current_turn_id = await this.getCurrentTurnId()
-      this.updateHistoryByTurnId(current_turn_id)
+      const current_history_id = await this.getCurrentHistoryId()
+      this.updateHistoryByHistoryId(current_history_id)
     },
   }
 })

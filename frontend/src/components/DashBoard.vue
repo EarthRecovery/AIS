@@ -16,18 +16,18 @@
           <div v-if="histories.length" class="history_list">
             <div
               v-for="turn in histories"
-              :key="turn.turn_id"
+              :key="turn.id"
               class="history_item"
-              :class="{ 'history_item--active': turn.turn_id === activeTurnId }"
-              @click="handleSelectTurn(turn.turn_id)"
+              :class="{ 'history_item--active': turn.id === activeTurnId }"
+              @click="handleSelectTurn(turn.id)"
               role="button"
               tabindex="0"
-              @keydown.enter.prevent="handleSelectTurn(turn.turn_id)"
-              @keydown.space.prevent="handleSelectTurn(turn.turn_id)"
+              @keydown.enter.prevent="handleSelectTurn(turn.id)"
+              @keydown.space.prevent="handleSelectTurn(turn.id)"
             >
               <div class="history_item__meta">
                 <span class="history_item__label">回合</span>
-                <span class="history_item__id">#{{ turn.turn_id }}</span>
+                <span class="history_item__id">#{{ turn.id }}</span>
               </div>
               <p class="history_item__summary">
                 {{ turn.summary || '暂无摘要' }}
@@ -60,7 +60,7 @@ const histories = computed(() => turnHistoryStore.turn_history)
 const isStarting = ref(false)
 const isSwitching = ref(false)
 const showSettings = ref(false)
-const activeTurnId = computed(() => chatHistoryStore.turn_id)
+const activeTurnId = computed(() => chatHistoryStore.history_id)
 
 const loadHistory = async () => {
   try {

@@ -1,29 +1,190 @@
 from fastapi import Depends
 from app.infra.llm_client import LLMClient
 from app.services.deps import get_llm_client
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, delete
+from app.db import get_db
+from app.models.message import Message as MessageModel
+from app.models.history import History as HistoryModel
+import asyncio
+from app.agent.middleware.rag import rag_context_middleware, rag_run
+from langchain.agents import create_agent, AgentState
+from langgraph.checkpoint.memory import InMemorySaver
+from langchain_core.runnables import RunnableConfig
+from typing import Any
+from dotenv import load_dotenv
+from dataclasses import dataclass
+from typing import Optional, Dict, Any
+import time
+from langchain_openai import ChatOpenAI
+from sqlalchemy import select
+from app.db import SessionLocal
+from app.models.history import History as HistoryModel
+from app.models.message import Message as MessageModel
+from app.security.deps import get_request_user_id
 
 class ChatService:
-    def __init__(self, llm: LLMClient = Depends(get_llm_client)):
+    def __init__(
+        self,
+        llm: LLMClient = Depends(get_llm_client),
+        db: AsyncSession = Depends(get_db),
+    ):
         self.llm = llm
+        self.db = db
+        self.token_limit = 128000
+        self.THRESHOLD = 0.001
+        self.history_messages = []
 
-    async def chat(self, msg: str):
-        reply = await self.llm.chat(msg)
+    def create_message(self, last_msg: str, current_history_id: int, user_id: int ):
+        # 更新history, 增加用户输入
+        history = self.history_messages
+        history.append(
+            MessageModel(
+                history_id=current_history_id,
+                role="user",
+                content=last_msg,
+            )
+        )
+
+        #[
+        #     {"role": "user", "content": "你好"},
+        #     {"role": "assistant", "content": "你好，我是AI助手"},
+        #     {"role": "user", "content": "今天天气怎么样？"},
+        # ]
+        return [{"role": msg.role, "content": msg.content} for msg in history]
+        
+
+    async def chat(self, msg: str, current_history_id: int, user_id: int):
+        self.history_messages = await self.get_chat_history_by_history_id(current_history_id)
+        messages = self.create_message(msg, current_history_id, user_id)
+        try:
+            reply = await self.llm.chat(messages, current_history_id)
+        except Exception as e:
+            print(f"Error during LLM response: {e}")
+            return "Sorry, there was an error processing your request."
+
+        await self.add_messages(
+            current_history_id,
+            [
+                {"role": "user", "content": msg},
+                {"role": "assistant", "content": reply},
+            ],
+        )
+
         return reply
     
-    async def chat_stream(self, msg: str):
-        async for chunk in self.llm.chat_stream(msg):
-            yield chunk
+    async def chat_stream(self, msg: str, current_history_id: int, user_id: int):
+        self.history_messages = await self.get_chat_history_by_history_id(current_history_id)
+        messages = self.create_message(msg, current_history_id, user_id)
+        assistant_content = ""
+        try:
+            async for chunk in self.llm.chat_stream(messages):
+                assistant_content += chunk
+                yield chunk
+        except Exception as e:
+            print(f"Error during LLM streaming response: {e}")
+            yield "Sorry, there was an error processing your request."
+            return
+
+        await self.add_messages(
+            current_history_id,
+            [
+                {"role": "user", "content": msg},
+                {"role": "assistant", "content": assistant_content},
+            ],
+        )
     
-    async def start_new_chat(self):
-        return await self.llm.start_new_chat()
+    async def start_new_chat(self, user_id: int):
+        await self.create_history(user_id)
+        return True
     
-    async def delete_chat(self, chat_id: int):
-        return await self.llm.delete_chat(chat_id)
+    async def delete_chat(self, history_id: int):
+        try:
+            await self.clear_chat_history(history_id)
+        except Exception as e:
+            print(f"Error during clearing chat history: {e}")
+            return False
+        return True
     
-    async def show_all_turn_data(self):
-        return await self.llm.show_all_turn_data()
+    async def show_all_chat_data(self):
+        return {chat_id: chat for chat_id, chat in self.chats.all_chats().items()}
     
-    async def get_current_turn_id(self):
-        return self.llm.agent.turn_id
+    async def get_current_chat_id(self):
+        return self.current_chat_id
     
+    async def change_to_turn(self, chat_id: int):
+        if chat_id in self.chats.all_chats():
+            self.current_chat_id = chat_id
+            return True
+        return False
+    
+    async def get_chat_list(self):
+        chat_history = await self.show_all_chat_data()
+        chat_list = []
+        for chat_id, history in chat_history.items():
+            chat_list.append({
+                "chat_id": chat_id,
+                "summary": history.summary,
+            })
+        return chat_list
+    
+    async def add_message(self, history_id: int, message: str):
+        msg = MessageModel(
+            history_id=history_id,
+            user_id=None,  # fill if you have current user context
+            role="user",
+            content=message,
+        )
+        self.db.add(msg)
+        await self.db.commit()
+        await self.db.refresh(msg)
+        return msg
+
+    async def add_messages(self, history_id: int, messages: list):
+        to_add = []
+        for m in messages:
+            to_add.append(
+                MessageModel(
+                    history_id=history_id,
+                    role=m.get("role", "user"),
+                    content=m.get("content", ""),
+                )
+            )
+        self.db.add_all(to_add)
+        await self.db.commit()
+        return to_add
+
+    async def delete_message(self, message_id: int):
+        await self.db.execute(delete(MessageModel).where(MessageModel.id == message_id))
+        await self.db.commit()
+        return True
+
+    async def clear_chat_history(self, history_id: int):
+        await self.db.execute(delete(MessageModel).where(MessageModel.history_id == history_id))
+        await self.db.execute(delete(HistoryModel).where(HistoryModel.id == history_id))
+        await self.db.commit()
+        return True
+
+    async def get_chat_history_by_history_id(self, history_id: int):
+        res = await self.db.execute(
+            select(MessageModel).where(MessageModel.history_id == history_id).order_by(MessageModel.timestamp)
+        )
+        return res.scalars().all()
+
+    async def get_chat_histories_by_user_id(self, user_id: int):
+        res = await self.db.execute(select(HistoryModel).where(HistoryModel.user_id == user_id))
+        return res.scalars().all()
+
+    async def update_chat_history(self, history_id: int, new_messages: list):
+        # Clear and reinsert
+        await self.clear_chat_history(history_id)
+        await self.add_messages(history_id, new_messages)
+        return True
+    
+    async def create_history(self, user_id: int):
+        new_history = HistoryModel(user_id=user_id)
+        self.db.add(new_history)
+        await self.db.commit()
+        await self.db.refresh(new_history)
+        return new_history
     

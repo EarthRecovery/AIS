@@ -5,7 +5,7 @@
         <n-notification-provider>
           <n-modal-provider>
             <n-dialog-provider>
-              <MainPage />
+              <RouterView />
             </n-dialog-provider>
           </n-modal-provider>
         </n-notification-provider>
@@ -15,5 +15,5 @@
 </template>
 
 <script setup>
-import MainPage from './views/MainPage.vue'
+import { RouterView } from 'vue-router'
 </script>
