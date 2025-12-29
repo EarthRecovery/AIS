@@ -64,3 +64,13 @@ async def get_turn_list(svc: ChatService = Depends(), user_id: str = Depends(get
 @router.post("/turns/change/{turn_id}")
 async def change_to_turn(turn_id: int, svc: ChatService = Depends()):
     return {"success": True}
+
+
+@router.get("/turns/getFirst")
+async def get_first_turn(svc: ChatService = Depends(), user_id: str = Depends(get_request_user_id)):
+    turn_list = await svc.get_chat_histories_by_user_id(user_id)
+    if turn_list:
+        first = turn_list[0]
+        return {"first_turn_id": first.id}
+        
+    return {"first_turn_id": None}

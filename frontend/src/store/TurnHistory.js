@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { getTurnHistory} from '@/api/turn'
+import { getTurnHistory, getFirstTurn } from '@/api/turn'
 import { startNewChat } from '@/api/chat'
 import { useChatHistoryStore } from '@/store/ChatHistory'
 
@@ -8,6 +8,15 @@ export const useTurnHistoryStore = defineStore('turnHistory', {
     turn_history: []
   }),
   actions: {
+    async initFirstTurn() {
+      const res = await getFirstTurn()
+      const firstId = res.data.first_turn_id
+      const chatHistoryStore = useChatHistoryStore()
+      if (firstId) {
+        chatHistoryStore.history_id = firstId
+        await chatHistoryStore.updateHistoryByHistoryId(firstId)
+      }
+    },
     async fetchTurnHistory() {
       console.log("Fetching turn history...")
       const res = await getTurnHistory()
@@ -20,7 +29,8 @@ export const useTurnHistoryStore = defineStore('turnHistory', {
       await this.fetchTurnHistory()
 
       const chatHistoryStore = useChatHistoryStore()
-      await chatHistoryStore.init()
+      console.log("Updating chat history for new turn:", res.data.id)
+      await chatHistoryStore.updateHistoryByHistoryId(res.data.id)
       return res
     },
 

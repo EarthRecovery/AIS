@@ -40,14 +40,6 @@ export const useChatHistoryStore = defineStore('chatHistory', {
       }
     },
 
-    async getCurrentHistoryId() {
-      if (this.history_id !== -1) {
-        return this.history_id
-      }else{
-        
-      }
-    },
-
     async updateHistoryByHistoryId(history_id) {
       const history_res = await getHistoryByHistoryId(history_id) //获取指定history_id的对话历史
       console.log("Fetched history for history_id", history_id, history_res)
@@ -59,13 +51,10 @@ export const useChatHistoryStore = defineStore('chatHistory', {
         }
       }
 
+      this.history_id = history_id
+
       this.token_used = history_res.data.token_used
       this.history_id = history_id
-    },
-
-    async init() {
-      const current_history_id = await this.getCurrentHistoryId()
-      this.updateHistoryByHistoryId(current_history_id)
     },
   }
 })

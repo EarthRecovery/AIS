@@ -10,3 +10,7 @@ export function getTurnHistory() {
 export function agentChangeToTurn(turn_id) {
     return request.post(`/turns/change/${turn_id}`)
 }
+
+export function getFirstTurn() {
+    return request.get('/turns/getFirst')
+}

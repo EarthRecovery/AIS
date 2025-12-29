@@ -36,6 +36,7 @@
 import { computed, onMounted, watch } from 'vue'
 import { useChatHistoryStore } from '@/store/ChatHistory'
 import { useTurnHistoryStore } from '@/store/TurnHistory'
+import Chat from './Chat.vue'
 
 const chatHistoryStore = useChatHistoryStore()
 const turnHistoryStore = useTurnHistoryStore()
@@ -54,21 +55,24 @@ const roleLabel = (role) => (normalizeRole(role) === 'assistant' ? 'AI' : '我')
 
 // 先确保 turn 历史加载，再同步首个 history 到 chat
 onMounted(async () => {
-  if (!turnHistoryStore.turn_history.length) {
-    await turnHistoryStore.fetchTurnHistory()
+  if (chatHistoryStore.history_id == -1) {
+    await turnHistoryStore.initFirstTurn()
   }
 })
 
 watch(
   () => turnHistoryStore.turn_history,
   async (list) => {
-    if (list && list.length) {
-      const first = list[0]
-      const firstId = first?.id ?? first?.history_id ?? first?.turn_id
-      if (firstId && chatHistoryStore.history_id !== firstId) {
-        chatHistoryStore.history_id = firstId
-        await chatHistoryStore.updateHistoryByHistoryId(firstId)
-      }
+    // 仅在尚未选中过 history 时使用列表首个初始化，避免覆盖用户选择
+    if (chatHistoryStore.history_id) {
+      return
+    }
+    if (!list || !list.length) return
+    const first = list[0]
+    const firstId = first?.id ?? first?.history_id ?? first?.turn_id
+    if (firstId) {
+      chatHistoryStore.history_id = firstId
+      await chatHistoryStore.updateHistoryByHistoryId(firstId)
     }
   },
   { immediate: true }

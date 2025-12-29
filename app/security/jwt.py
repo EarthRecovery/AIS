@@ -8,7 +8,7 @@ SECRET_KEY = os.getenv("JWT_SECRET", "change-me")
 ALGO = "HS256"
 bearer_scheme = HTTPBearer(auto_error=False)
 
-def create_access_token(sub: str, expires_minutes: int = 120) -> str:
+def create_access_token(sub: str, expires_minutes: int = 360) -> str:
     now = datetime.datetime.utcnow()
     payload = {"sub": sub, "exp": now + datetime.timedelta(minutes=expires_minutes), "iat": now}
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGO)
