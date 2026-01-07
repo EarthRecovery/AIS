@@ -6,11 +6,11 @@ class LLMClient:
         self.agent = LLMAgent()
         # self.agent.start_new_turn()
 
-    async def chat(self, message: str, history_id: int):
-        return self.agent.get_response(message, history_id)
+    async def chat(self, message: str, history_id: int, role_settings=None) -> str:
+        return self.agent.get_response(message, history_id, role_settings)
     
-    async def chat_stream(self, message: str):
-        async for chunk in self.agent.get_response_astream(message):
+    async def chat_stream(self, message: str, history_id: int, role_settings=None):
+        async for chunk in self.agent.get_response_astream(message, history_id, role_settings):
             yield chunk
     
     async def start_new_chat(self):

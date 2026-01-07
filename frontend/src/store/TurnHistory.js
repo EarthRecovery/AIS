@@ -21,16 +21,23 @@ export const useTurnHistoryStore = defineStore('turnHistory', {
       console.log("Fetching turn history...")
       const res = await getTurnHistory()
       console.log("Turn history fetched:", res.data.turns)
-      this.turn_history = res.data.turns
+      const turns = res.data?.turns || []
+      // 最新的记录放前面
+      this.turn_history = [...turns].sort((a, b) => (b?.id ?? 0) - (a?.id ?? 0))
     },
 
-    async startNewTurn() {
-      const res = await startNewChat()
+    async startNewTurn(roleId) {
+      // 默认角色回退
+      const chosenRoleId = roleId || 1
+      const res = await startNewChat(chosenRoleId)
       await this.fetchTurnHistory()
 
       const chatHistoryStore = useChatHistoryStore()
-      console.log("Updating chat history for new turn:", res.data.id)
-      await chatHistoryStore.updateHistoryByHistoryId(res.data.id)
+      const newHistoryId = res?.data?.id || res?.data?.success?.id
+      console.log("Updating chat history for new turn:", newHistoryId)
+      if (newHistoryId) {
+        await chatHistoryStore.updateHistoryByHistoryId(newHistoryId)
+      }
       return res
     },
 

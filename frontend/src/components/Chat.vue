@@ -11,7 +11,7 @@
           minlength="1"
           class="chat-input"
           placeholder=""
-          autosize
+          :autosize="{ minRows: 2, maxRows: 20 }"
           :bordered="false"
         />
         <n-button
@@ -61,14 +61,14 @@ const sendMessage = () => {
 }
 
 .chat_box {
-  flex: 0 0 90%;
+  flex: 1 1 auto;
   min-height: 0;
   background-color: #ffffff;
   display: flex;
 }
 
 .input_box {
-  flex: 1;
+  flex: 0 0 auto;
   padding: 16px 24px;
   background: linear-gradient(180deg, #f9fafb, #f1f3f5);
   border-top: 1px solid #e5e7eb;
@@ -96,7 +96,9 @@ const sendMessage = () => {
   line-height: 1.5;
   background-color: #fff;
   border-radius: 20px;
-  resize: none;
+  resize: vertical; /* allow manual vertical resize for longer input */
+  max-height: 50vh; /* prevent exceeding viewport height */
+  overflow-y: auto; /* scroll if hitting cap */
 }
 
 .send-button {

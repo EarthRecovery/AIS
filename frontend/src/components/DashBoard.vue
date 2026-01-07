@@ -5,6 +5,13 @@
         <n-button type="primary" @click="handleOpenSettings" class="upper_button">
           设置
         </n-button>
+        <n-select
+          v-model:value="selectedRoleId"
+          :options="roleOptions"
+          :loading="isLoadingRoles"
+          placeholder="选择角色"
+          class="upper_select"
+        />
         <n-button type="primary" @click="handleStartNewChat" :loading="isStarting" class="upper_button">
           新建对话
         </n-button>
@@ -32,6 +39,11 @@
               <p class="history_item__summary">
                 {{ turn.summary || '暂无摘要' }}
               </p>
+              <div class="history_item__footer">
+                <span class="history_item__role" title="角色">
+                  {{ turn.role_name || '默认角色' }}
+                </span>
+              </div>
             </div>
           </div>
           <div v-else class="history_empty">
@@ -49,10 +61,11 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { NScrollbar, NButton } from 'naive-ui'
+import { NScrollbar, NButton, NSelect } from 'naive-ui'
 import { useTurnHistoryStore } from '@/store/TurnHistory'
 import { useChatHistoryStore } from '@/store/ChatHistory'
 import SettingsPanel from './SettingsPanel.vue'
+import { getRoleList } from '@/api/role'
 
 const turnHistoryStore = useTurnHistoryStore()
 const chatHistoryStore = useChatHistoryStore()
@@ -61,6 +74,9 @@ const isStarting = ref(false)
 const isSwitching = ref(false)
 const showSettings = ref(false)
 const activeTurnId = computed(() => chatHistoryStore.history_id)
+const selectedRoleId = ref(null)
+const roleOptions = ref([])
+const isLoadingRoles = ref(false)
 
 const loadHistory = async () => {
   try {
@@ -70,11 +86,30 @@ const loadHistory = async () => {
   }
 }
 
+const loadRoles = async () => {
+  isLoadingRoles.value = true
+  try {
+    const res = await getRoleList()
+    const roles = res?.data?.roles || []
+    roleOptions.value = roles.map((role) => ({
+      label: role.name,
+      value: role.id
+    }))
+    if (!selectedRoleId.value && roleOptions.value.length) {
+      selectedRoleId.value = roleOptions.value[0].value
+    }
+  } catch (error) {
+    console.error('failed to load roles', error)
+  } finally {
+    isLoadingRoles.value = false
+  }
+}
+
 const handleStartNewChat = async () => {
   if (isStarting.value) return
   isStarting.value = true
   try {
-    await turnHistoryStore.startNewTurn()
+    await turnHistoryStore.startNewTurn(selectedRoleId.value)
   } catch (error) {
     console.error('failed to start new chat', error)
   } finally {
@@ -109,6 +144,7 @@ const handleSubmitSettings = (payload) => {
 
 onMounted(() => {
   loadHistory()
+  loadRoles()
 })
 </script>
 
@@ -129,6 +165,10 @@ onMounted(() => {
   gap: 16px;
   flex-wrap: wrap;
   justify-content: center;
+}
+.upper_select {
+  flex: 1 1 180px;
+  max-width: 260px;
 }
 .upper_button {
   flex: 1 1 180px;
@@ -195,6 +235,18 @@ onMounted(() => {
   color: #1e293b;
   line-height: 1.6;
   font-size: 14px;
+}
+.history_item__footer {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+}
+.history_item__role {
+  font-size: 12px;
+  color: #475569;
+  background: #f1f5f9;
+  border-radius: 10px;
+  padding: 4px 10px;
 }
 .history_empty {
   height: 100%;

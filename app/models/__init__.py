@@ -1,2 +1,3 @@
 from app.db import Base  # re-export Base for Alembic/migrations
-from app.models import user, message, history
+# Import models so Alembic autogenerate can see their metadata
+from app.models import user, message, history, role, profile  # noqa: F401

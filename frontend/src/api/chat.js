@@ -68,6 +68,7 @@ export function getHistoryByHistoryId(history_id) {
   return request.get(`/chat/history/${history_id}`)
 }
 
-export function startNewChat() {
-  return request.get('/chat/new')
+export function startNewChat(roleId) {
+  const selected = roleId || 1
+  return request.get(`/chat/new/${selected}`)
 }

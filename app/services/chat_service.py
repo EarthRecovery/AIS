@@ -1,19 +1,12 @@
+
 from fastapi import Depends
 from app.infra.llm_client import LLMClient
 from app.services.deps import get_llm_client
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 from app.db import get_db
 from app.models.message import Message as MessageModel
 from app.models.history import History as HistoryModel
-import asyncio
-from app.agent.middleware.rag import rag_context_middleware, rag_run
-from langchain.agents import create_agent, AgentState
-from langgraph.checkpoint.memory import InMemorySaver
-from langchain_core.runnables import RunnableConfig
-from typing import Any
-from dotenv import load_dotenv
-from dataclasses import dataclass
 from typing import Optional, Dict, Any
 import time
 from langchain_openai import ChatOpenAI
@@ -22,6 +15,7 @@ from app.db import SessionLocal
 from app.models.history import History as HistoryModel
 from app.models.message import Message as MessageModel
 from app.security.deps import get_request_user_id
+from app.services.role_service import RoleService
 
 class ChatService:
     def __init__(
@@ -56,9 +50,19 @@ class ChatService:
 
     async def chat(self, msg: str, current_history_id: int, user_id: int):
         self.history_messages = await self.get_chat_history_by_history_id(current_history_id)
+        history = await self.get_history_by_id(current_history_id)
+        if history.role_id == None or history.role_id == 0:
+            role_id = 1  # default role id
+        else:
+            role_id = history.role_id
+        role_settings = await RoleService(db=self.db).get_role_setting_by_id(role_id)
+        # Fallback if role not found to avoid None in middleware
+        if role_settings is None:
+            from app.models.role_setting import RoleSetting
+            role_settings = RoleSetting()
         messages = self.create_message(msg, current_history_id, user_id)
         try:
-            reply = await self.llm.chat(messages, current_history_id)
+            reply = await self.llm.chat(messages, current_history_id, role_settings)
         except Exception as e:
             print(f"Error during LLM response: {e}")
             return "Sorry, there was an error processing your request."
@@ -76,9 +80,12 @@ class ChatService:
     async def chat_stream(self, msg: str, current_history_id: int, user_id: int):
         self.history_messages = await self.get_chat_history_by_history_id(current_history_id)
         messages = self.create_message(msg, current_history_id, user_id)
+        history= await self.get_history_by_id(current_history_id)
+        role_id = history.role_id if history.role_id else 1
+        role_settings = await RoleService(db=self.db).get_role_setting_by_id(role_id)
         assistant_content = ""
         try:
-            async for chunk in self.llm.chat_stream(messages):
+            async for chunk in self.llm.chat_stream(messages, current_history_id, role_settings):
                 assistant_content += chunk
                 yield chunk
         except Exception as e:
@@ -93,10 +100,13 @@ class ChatService:
                 {"role": "assistant", "content": assistant_content},
             ],
         )
+
+        await self.update_history_summary(current_history_id, msg)
     
-    async def start_new_chat(self, user_id: int):
-        await self.create_history(user_id)
-        return True
+    async def start_new_chat(self, user_id: int, role_id: int):
+        role_id = role_id or 1
+        new_history = await self.create_history(user_id, role_id)
+        return new_history
     
     async def delete_chat(self, history_id: int):
         try:
@@ -181,10 +191,26 @@ class ChatService:
         await self.add_messages(history_id, new_messages)
         return True
     
-    async def create_history(self, user_id: int):
-        new_history = HistoryModel(user_id=user_id)
+    async def create_history(self, user_id: int, role_id: int):
+        role_name = await RoleService(db=self.db).get_role_name_by_id(role_id)
+        role_name = role_name or "默认角色"
+        new_history = HistoryModel(user_id=user_id, role_id=role_id, role_name=role_name)
         self.db.add(new_history)
         await self.db.commit()
         await self.db.refresh(new_history)
         return new_history
     
+    async def get_history_by_id(self, history_id: int) -> Optional[HistoryModel]:
+        res = await self.db.execute(
+            select(HistoryModel).where(HistoryModel.id == history_id)
+        )
+        history = res.scalar_one_or_none()
+        return history
+    
+    async def update_history_summary(self, history_id: int, summary: str):
+        await self.db.execute(
+            update(HistoryModel).where(HistoryModel.id == history_id).values(summary=summary)
+        )
+        print(f"Updating history {history_id} summary to: {summary}")
+        await self.db.commit()
+        return True

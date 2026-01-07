@@ -12,6 +12,7 @@ SQLAlchemy>=2.0
 aiomysql
 alembic
 email-validator
+jinja2
 pyjwt
 pydantic==2.12.3
 python-dotenv==1.2.1

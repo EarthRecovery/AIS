@@ -13,6 +13,8 @@ class History(Base):
     user_id: Mapped[int] = mapped_column(Integer, nullable=False)
     summary: Mapped[str] = mapped_column(String(255), nullable=True)
     token_usage: Mapped[int] = mapped_column(Integer, nullable=True)
+    role_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    role_name: Mapped[str] = mapped_column(String(50), nullable=False, default="娜洛")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

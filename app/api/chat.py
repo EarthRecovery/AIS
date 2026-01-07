@@ -35,10 +35,15 @@ async def chat_stream_post(req: ChatRequest, svc: ChatService = Depends(), user_
         },
     )
 
-@router.get("/chat/new")
-async def start_new_chat(svc: ChatService = Depends(), user_id: str = Depends(get_request_user_id)):
-    result = await svc.start_new_chat(user_id)
-    return {"success": result}
+@router.get("/chat/new/{role_id}")
+async def start_new_chat(role_id: int, svc: ChatService = Depends(), user_id: str = Depends(get_request_user_id)):
+    result = await svc.start_new_chat(user_id, role_id)
+    return {
+        "id": result.id,
+        "role_id": result.role_id,
+        "role_name": result.role_name,
+        "created_at": result.created_at,
+    }
 
 @router.delete("/chat/{history_id}")
 async def delete_chat(history_id: int, svc: ChatService = Depends()):
@@ -70,7 +75,7 @@ async def change_to_turn(turn_id: int, svc: ChatService = Depends()):
 async def get_first_turn(svc: ChatService = Depends(), user_id: str = Depends(get_request_user_id)):
     turn_list = await svc.get_chat_histories_by_user_id(user_id)
     if turn_list:
-        first = turn_list[0]
+        first = turn_list[-1]
         return {"first_turn_id": first.id}
         
     return {"first_turn_id": None}
