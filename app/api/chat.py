@@ -1,3 +1,4 @@
+import json
 from app.security.deps import get_request_user_id
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
@@ -23,7 +24,8 @@ async def chat(req: ChatRequest, svc: ChatService = Depends(), user_id: str = De
 async def chat_stream_post(req: ChatRequest, svc: ChatService = Depends(), user_id: str = Depends(get_request_user_id)):
     async def event_generator():
         async for chunk in svc.chat_stream(req.message, req.history_id, user_id=user_id):
-            yield f"data: {chunk}\n\n"
+            # print(repr(chunk))
+            yield f"data: {chunk}\r\n\r\n"
 
     return StreamingResponse(
         event_generator(),

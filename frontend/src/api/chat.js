@@ -8,6 +8,34 @@ export function sendChatMessage(message, history_id) {
   })
 }
 
+function decodeStreamPayload(payload) {
+  let chunk
+  try {
+    chunk = JSON.parse(payload)
+  } catch (e) {
+    chunk = payload
+  }
+  if (typeof chunk !== 'string') {
+    chunk = chunk != null ? String(chunk) : ''
+  }
+  // strip accidental wrapping quotes like "\"你好\""
+  if (chunk.startsWith('"') && chunk.endsWith('"')) {
+    chunk = chunk.slice(1, -1)
+  }
+  // normalize escaped newlines/tabs that may leak through double-encoded payloads
+  // handle double-escaped first, then single-escaped
+  chunk = chunk.replace(/\\\\n/g, '\n').replace(/\\\\t/g, '\t')
+  chunk = chunk.replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+  // sometimes model may emit literal "/n"
+  chunk = chunk.replace(/\/n/g, '\n')
+  return chunk
+}
+
+function trimSpacesOnly(str) {
+  // remove leading/trailing spaces and tabs but preserve newlines
+  return str.replace(/^[ \t]+|[ \t]+$/g, '')
+}
+
 export async function streamChatMessage(message, history_id, onChunk) {
   const token = localStorage.getItem('ais_token')
   if (!token) {
@@ -41,25 +69,48 @@ export async function streamChatMessage(message, history_id, onChunk) {
     if (done) break
     buffer += decoder.decode(value, { stream: true })
 
+    // 支持 \r\n\r\n 边界
     let boundary
-    while ((boundary = buffer.indexOf('\n\n')) !== -1) {
-      const raw = buffer.slice(0, boundary).trim()
-      buffer = buffer.slice(boundary + 2)
-      if (!raw.startsWith('data:')) continue
-      const chunk = raw.slice(5).trim()
-      if (!chunk) continue
+    while ((boundary = buffer.search(/\r\n\r\n/)) !== -1) {
+      console.log(
+        'buffer:',
+        buffer
+          .replace(/\r/g, '\\r')
+          .replace(/\n/g, '\\n')
+      )
+
+      const raw = buffer.slice(0, boundary)
+      console.log(
+        'raw:',
+        raw
+          .replace(/\r/g, '\\r')
+          .replace(/\n/g, '\\n')
+      )
+      
+      buffer = buffer.slice(boundary + 4) // skip the boundary
+      if(!raw.startsWith('data:')) {
+        // Not a data line; skip
+        continue
+      }
+      let payload = raw.slice(5)
+      const chunk = trimSpacesOnly(decodeStreamPayload(payload))
       fullText += chunk
       if (onChunk) onChunk(chunk)
     }
+    
   }
 
   // Flush any remaining buffered content
-  const tail = buffer.trim()
+  const tail = buffer
   if (tail.startsWith('data:')) {
-    const chunk = tail.slice(5).trim()
+    let payload = tail.slice(5)
+    if (payload.startsWith(' ')) payload = payload.slice(1)
+    const chunk = trimSpacesOnly(decodeStreamPayload(payload))
     fullText += chunk
     if (onChunk) onChunk(chunk)
   }
+
+  console.log('Full streamed text:', fullText)
 
   return fullText
 }

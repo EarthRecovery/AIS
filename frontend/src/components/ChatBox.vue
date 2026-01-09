@@ -5,6 +5,7 @@
       :style="{ height: '100%' }"
       :container-style="{ maxHeight: '100%' }"
       :content-style="{ paddingRight: '8px' }"
+      ref="scrollRef"
     >
       <div
         v-for="(message, index) in messages"
@@ -33,13 +34,14 @@
 </template>
 
 <script setup>
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, watch, ref, nextTick } from 'vue'
 import { useChatHistoryStore } from '@/store/ChatHistory'
 import { useTurnHistoryStore } from '@/store/TurnHistory'
 import Chat from './Chat.vue'
 
 const chatHistoryStore = useChatHistoryStore()
 const turnHistoryStore = useTurnHistoryStore()
+const scrollRef = ref(null)
 
 const messages = computed(() => chatHistoryStore.chatHistory)
 
@@ -77,6 +79,28 @@ watch(
   },
   { immediate: true }
 )
+
+// 保持滚动到底部
+const scrollToBottom = () => {
+  nextTick(() => {
+    // Naive UI n-scrollbar 提供 scrollTo，直接滚动到底部
+    scrollRef.value?.scrollTo({ position: 'bottom' })
+  })
+}
+
+watch(
+  () => messages.value.length,
+  () => scrollToBottom()
+)
+
+watch(
+  () => messages.value.map((m) => m.content),
+  () => scrollToBottom()
+)
+
+onMounted(() => {
+  scrollToBottom()
+})
 </script>
 
 <style scoped>

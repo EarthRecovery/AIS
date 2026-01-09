@@ -13,6 +13,7 @@
           placeholder=""
           :autosize="{ minRows: 2, maxRows: 20 }"
           :bordered="false"
+          @keydown="onKeydown"
         />
         <n-button
           type="primary"
@@ -49,6 +50,14 @@ const sendMessage = () => {
   if (!canSend.value) return
   chatHistoryStore.sendMessage(message.value)
   message.value = ''
+}
+
+const onKeydown = (e) => {
+  // Enter 发送，Shift+Enter 换行
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault()
+    sendMessage()
+  }
 }
 </script>
 

@@ -10,7 +10,11 @@ class RetrieveAgent:
 
     # 使用向量存储模型检索与查询最相关的文档。k 指定要检索的文档数量。
     def retrieve(self, query: str, k: int = 3):
-        docs = self.model.openai_vector_store_model.similarity_search(query, k=k)
+        store = self.model.get_openai_vector_store_model(
+            self.model.get_openai_embedding_model(),
+            collection_name="default_collection",
+        )
+        docs = store.similarity_search(query, k=k)
         return docs
 
     # 输入查询，检索相关文档，并基于这些文档生成回答。

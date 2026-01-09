@@ -21,3 +21,8 @@ class RAGClient:
     def get_collection_names(self):
         return self.app.get_collection_names()
 
+    def create_collection_from_json_list_file(self, json_list_file: str, collection_name: str, skip_split: bool = False):
+        return self.app.create_collection_from_json_list_file(json_list_file, collection_name, skip_split)
+
+    def delete_collection(self, collection_name: str):
+        return self.app.delete_collection(collection_name)

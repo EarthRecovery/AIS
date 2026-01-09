@@ -9,6 +9,11 @@ class AddContextRequest(BaseModel):
     context: str
     channel: str = "default"
 
+class jsonListFileRequest(BaseModel):
+    json_list_file: str
+    collection_name: str
+    skip_split: bool = False
+
 @router.get("/rag/is_service_available")
 async def is_service_available(svc: RagService = Depends()):
     available = svc.is_service_available()
@@ -48,3 +53,20 @@ async def get_vector_line_count(collection_name: str, svc: RagService = Depends(
 async def get_collection_names(svc: RagService = Depends()):
     names = await svc.get_collection_names()
     return {"collection_names": names}
+
+@router.delete("/rag/delete_collection/{collection_name}")
+async def delete_collection(collection_name: str, svc: RagService = Depends()):
+    result = await svc.delete_collection(collection_name)
+    return {"success": bool(result)}
+
+@router.post("/rag/create_collection_from_json_list_file")
+async def create_collection_from_json_list_file(
+    request: jsonListFileRequest,
+    svc: RagService = Depends()
+):
+    count = await svc.create_collection_from_json_list_file(
+        request.json_list_file,
+        request.collection_name,
+        request.skip_split
+    )
+    return {"added_count": count}

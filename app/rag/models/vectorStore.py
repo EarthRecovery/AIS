@@ -1,6 +1,7 @@
 from langchain_community.vectorstores import Chroma
 from chromadb import PersistentClient
 import hashlib
+from langchain_core.documents import Document
 
 class VectorStore:
     def __init__(self, embedding_model, collection_name: str = "default_collection", persist_directory: str | None = None):
@@ -14,20 +15,31 @@ class VectorStore:
 
         self.client = PersistentClient(path=self.persist_dir)
 
-    def add_vectors(self, vectors):
+    def add_vectors(self, vectors, jump_duplicate=True):
         print(">>> add_vectors CALLED")
         print(">>> num vectors:", len(vectors))
         delete_rows = 0
+        add_rows = 0
+        
         for doc in vectors:
+            if isinstance(doc, dict):
+                doc = Document(
+                    page_content=doc.get("page_content", ""),
+                    metadata=doc.get("metadata", {}) or {},
+                )
             doc.metadata["doc_id"] = self.doc_id(doc)
             # 去重
-            existing_docs = self.store.similarity_search(doc.page_content, k=1)
-            if existing_docs:
-                if existing_docs[0].metadata.get("doc_id") == doc.metadata["doc_id"]:
-                    delete_rows += 1
-                    print(f">>> Duplicate document found, skipping: {doc.metadata.get('source', 'N/A')}")
-                    continue
+            if jump_duplicate:
+                existing_docs = self.store.similarity_search(doc.page_content, k=1)
+                if existing_docs:
+                    if existing_docs[0].metadata.get("doc_id") == doc.metadata["doc_id"]:
+                        delete_rows += 1
+                        print(f">>> Duplicate document found, skipping: {doc.metadata.get('source', 'N/A')}")
+                        continue
             self.store.add_documents([doc])
+            print(f">>> Document added: {doc.page_content[:30]}...")
+            add_rows += 1
+            print(f">>> Documents added so far: {add_rows}")
         print(">>> add_vectors DONE")
         print(f">>> Vectors added: {len(vectors) - delete_rows}, Duplicates skipped: {delete_rows}")
         self.store.persist()

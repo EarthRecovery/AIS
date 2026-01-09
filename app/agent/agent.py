@@ -93,7 +93,7 @@ class LLMAgent():
     async def _rag_middleware(self, state):
         messages = state["messages"]
 
-        context = rag_run(messages, state.get("identity", None))   # 如果以后 async，直接 await
+        context = rag_run(messages, state.get("role_settings").get("rag_name"))
 
         if not context:
             return state

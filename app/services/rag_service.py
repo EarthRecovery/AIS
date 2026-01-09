@@ -21,3 +21,9 @@ class RagService:
     
     async def get_collection_names(self):
         return self.rag.get_collection_names()
+    
+    async def create_collection_from_json_list_file(self, json_list_file: str, collection_name: str, skip_split: bool = False) -> int:
+        return self.rag.create_collection_from_json_list_file(json_list_file, collection_name, skip_split)
+
+    async def delete_collection(self, collection_name: str):
+        return self.rag.delete_collection(collection_name)

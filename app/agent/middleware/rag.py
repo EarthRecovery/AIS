@@ -41,7 +41,9 @@ def rag_run(messages: list, role_rag_name=None) -> str:
     last_content = getattr(last_user, "content", None) if not isinstance(last_user, dict) else last_user.get("content")
     if last_content is None or not role_rag_name:
         return None
-    docs = get_rag_docs(last_content, k=3, role_rag_name=role_rag_name)
+    docs = get_rag_docs(last_content, k=10, role_rag_name=role_rag_name)
+    # print(role_rag_name)
+    # print(">>> RAG docs found:", len(docs))
     if not docs:
         return None
     ctx = "\n\n".join(d.page_content for d in docs)

@@ -11,6 +11,11 @@ export const useChatHistoryStore = defineStore('chatHistory', {
     addMessage(role, content, history_id) {
       this.chatHistory.push({ role, content, history_id })
     },
+    normalizeText(text) {
+      let value = text != null ? String(text) : ''
+      value = value.replace(/\/n/g, '\n\n')
+      return value
+    },
     clearHistory() {
       this.chatHistory = []
       this.token_used = 0
@@ -29,10 +34,10 @@ export const useChatHistoryStore = defineStore('chatHistory', {
       try {
         const fullReply = await streamChatMessage(content, this.history_id, (delta) => {
           // 追加增量
-          this.chatHistory[assistantIndex].content += delta
+          this.chatHistory[assistantIndex].content += this.normalizeText(delta)
         })
         // 确保最终内容完整
-        this.chatHistory[assistantIndex].content = fullReply
+        this.chatHistory[assistantIndex].content = this.normalizeText(fullReply)
       } catch (err) {
         // 失败时写入错误提示
         this.chatHistory[assistantIndex].content = '对话失败，请重试'
@@ -58,4 +63,3 @@ export const useChatHistoryStore = defineStore('chatHistory', {
     },
   }
 })
-

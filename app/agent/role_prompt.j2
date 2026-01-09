@@ -7,6 +7,13 @@
 角色设定：
 {{ role.description }}
 
+世界设定：
+{% if role.worldview %}
+{{ role.worldview }}
+{% else %}
+- 未明确设定
+{% endif %}
+
 角色性格特征：
 {% if role.personality %}
 {% for trait in role.personality %}

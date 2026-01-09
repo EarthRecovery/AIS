@@ -12,11 +12,12 @@ class OpenAIModel:
     def __init__(self):
         self.openai_chat_model = None
         self.openai_embedding_model = None
-        self.openai_vector_store_model = None
+        self._vector_stores = {}
 
         self.openai_chat_model = self.get_openai_model()
         self.openai_embedding_model = self.get_openai_embedding_model()
-        self.openai_vector_store_model = self.get_openai_vector_store_model(
+        # prime default collection
+        self.get_openai_vector_store_model(
             self.openai_embedding_model,
             collection_name="default_collection",
         )
@@ -42,10 +43,12 @@ class OpenAIModel:
         collection_name: str = "default_collection",
         persist_directory: str | None = None,
     ):
-        if self.openai_vector_store_model is None:
-            self.openai_vector_store_model = VectorStore(
+        store = self._vector_stores.get(collection_name)
+        if store is None:
+            store = VectorStore(
                 embedding_model,
                 collection_name=collection_name,
                 persist_directory=persist_directory,
             )
-        return self.openai_vector_store_model
+            self._vector_stores[collection_name] = store
+        return store
