@@ -103,7 +103,7 @@ class ChatService:
 
         await self.update_history_summary(current_history_id, msg)
     
-    async def start_new_chat(self, user_id: int, role_id: int):
+    async def start_new_chat(self, user_id: int, role_id: int = 1):
         role_id = role_id or 1
         new_history = await self.create_history(user_id, role_id)
         return new_history

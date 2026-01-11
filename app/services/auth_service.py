@@ -54,7 +54,7 @@ class AuthService:
 
         new_user.token = await self.create_jwt_token(new_user.id)
         chatService = ChatService(db=self.db)
-        await chatService.start_new_chat(new_user.id)
+        await chatService.start_new_chat(new_user.id, role_id=1)
         return new_user
 
     async def authenticate(self, email: str | None = None, phone_number: str | None = None, password: str = None) -> User:
