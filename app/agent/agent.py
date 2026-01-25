@@ -21,6 +21,7 @@ from app.agent.middleware.role import role_prompt_middleware as role_middleware
 from app.agent.middleware.debug import debug_prompt_middleware
     
 from langchain_core.messages import BaseMessage
+import tiktoken
 
 class MyAgentState(TypedDict, total=False):
     messages: List[BaseMessage]
@@ -46,6 +47,8 @@ class LLMAgent():
             checkpointer=InMemorySaver(),
             state_schema=MyAgentState,
         )
+
+        self.summary_token_limit = 5000
 
     def get_response(self, messages, history_id, role_settings) -> str:
 
@@ -76,6 +79,8 @@ class LLMAgent():
 
         final_messages = state["messages"]
         # self._log_prompt_messages(final_messages)
+        print(f"[LLM] Final messages count: {len(final_messages)}")
+        print(final_messages)
 
         assistant_content = ""
         async for chunk in self.llm.astream(final_messages):
@@ -87,8 +92,80 @@ class LLMAgent():
         state = self._role_middleware(state, runtime=None)
         state = self._base_prompt_middleware(state)
         state = await self._rag_middleware(state)
+        state = await self._summary_middleware(state)
         # state = self._memory_middleware(state)  # 以后加
         return state
+    
+    async def _summary_middleware(self, state):
+        # 计算总token数量
+        # 如果没有超过就直接返回
+        # 如果超过限制，总结前50%的消息
+        messages = state.get("messages") or []
+        if not messages:
+            return state
+        
+        print(messages)
+
+        enc = tiktoken.get_encoding("cl100k_base")
+
+        def _message_text(msg: BaseMessage) -> str:
+            if isinstance(msg, dict):
+                content = msg.get("content", "")
+            else:
+                content = getattr(msg, "content", "")
+            if isinstance(content, list):
+                # Flatten list-based content to a readable string for token counting.
+                return " ".join(str(part) for part in content)
+            return str(content)
+
+        total_tokens = sum(len(enc.encode(_message_text(m))) for m in messages)
+        print(f"[LLM][summary] Total tokens in messages: {total_tokens}")
+        if total_tokens <= self.summary_token_limit:
+            return state
+        
+        print(f"[LLM][summary] Total tokens {total_tokens} exceed limit {self.summary_token_limit}, summarizing...")
+
+        # Keep system prompts intact; summarize the first half of non-system messages.
+        system_prefix: List[BaseMessage] = []
+        start_idx = 0
+        for idx, msg in enumerate(messages):
+            if getattr(msg, "type", None) == "system":
+                system_prefix.append(msg)
+                start_idx = idx + 1
+            else:
+                break
+
+        convo_msgs = messages[start_idx:]
+        if not convo_msgs:
+            return state
+
+        split_idx = max(1, len(convo_msgs) // 2)
+        to_summarize = convo_msgs[:split_idx]
+        to_keep = convo_msgs[split_idx:]
+
+        summary_llm = ChatOpenAI(model="gpt-4.1", temperature=0)
+        summary_prompt = [
+            SystemMessage(
+                content=(
+                    "Summarize the following conversation into concise, durable memory. "
+                    "Keep key facts, decisions, names, constraints, and open tasks."
+                )
+            ),
+            *to_summarize,
+        ]
+        summary_msg = await summary_llm.ainvoke(summary_prompt)
+        summary_text = getattr(summary_msg, "content", "")
+
+        print(f"[LLM][summary] Summary generated: {summary_text}")
+
+        summary_system_msg = SystemMessage(
+            content=f"Conversation summary (earlier messages):\n{summary_text}"
+        )
+
+        return {
+            **state,
+            "messages": [*system_prefix, summary_system_msg, *to_keep],
+        }
     
     async def _rag_middleware(self, state):
         messages = state["messages"]
