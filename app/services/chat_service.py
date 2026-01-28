@@ -16,6 +16,7 @@ from app.models.history import History as HistoryModel
 from app.models.message import Message as MessageModel
 from app.security.deps import get_request_user_id
 from app.services.role_service import RoleService
+from app.services.summary_service import SummaryService
 
 class ChatService:
     def __init__(
@@ -60,7 +61,10 @@ class ChatService:
         if role_settings is None:
             from app.models.role_setting import RoleSetting
             role_settings = RoleSetting()
-        messages = self.create_message(msg, current_history_id, user_id)
+        summary_service = SummaryService(db=self.db, llm=self.llm)
+        messages = await summary_service.prepare_messages(
+            current_history_id, self.history_messages, msg
+        )
         try:
             reply = await self.llm.chat(messages, current_history_id, role_settings)
         except Exception as e:
@@ -79,10 +83,16 @@ class ChatService:
     
     async def chat_stream(self, msg: str, current_history_id: int, user_id: int):
         self.history_messages = await self.get_chat_history_by_history_id(current_history_id)
-        messages = self.create_message(msg, current_history_id, user_id)
         history= await self.get_history_by_id(current_history_id)
         role_id = history.role_id if history.role_id else 1
         role_settings = await RoleService(db=self.db).get_role_setting_by_id(role_id)
+        if role_settings is None:
+            from app.models.role_setting import RoleSetting
+            role_settings = RoleSetting()
+        summary_service = SummaryService(db=self.db, llm=self.llm)
+        messages = await summary_service.prepare_messages(
+            current_history_id, self.history_messages, msg
+        )
         assistant_content = ""
         try:
             async for chunk in self.llm.chat_stream(messages, current_history_id, role_settings):

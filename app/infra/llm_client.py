@@ -12,6 +12,9 @@ class LLMClient:
     async def chat_stream(self, message: str, history_id: int, role_settings=None):
         async for chunk in self.agent.get_response_astream(message, history_id, role_settings):
             yield chunk
+
+    async def summarize_messages(self, messages):
+        return await self.agent.summarize_messages(messages)
     
     async def start_new_chat(self):
         self.agent.start_new_turn()
