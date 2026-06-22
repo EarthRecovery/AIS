@@ -1,0 +1,21 @@
+[Unit]
+Description=AIS FastAPI Backend
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/ais
+Environment=HOME=/home/ec2-user
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/home/ec2-user/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/ec2-user/ais/scripts/run-backend.sh
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

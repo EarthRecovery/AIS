@@ -1,7 +1,10 @@
 .env
 .vscode/
 node_modules/
+logs/
 
 data/
 venv/
 __pycache__/
+.venv/
+.venv310/

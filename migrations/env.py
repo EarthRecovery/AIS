@@ -7,8 +7,8 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from app.db import Base  # Base.metadata 包含模型表
-from app import models  # noqa: F401  确保模型被导入注册到 Base.metadata
+from storage.db import Base  # Base.metadata 包含模型表
+from storage import models  # noqa: F401  确保模型被导入注册到 Base.metadata
 
 config = context.config
 

@@ -1,10 +1,10 @@
-# 生成迁移文件
-DATABASE_URL="mysql+aiomysql://user:123456@18.170.57.90:3306/ais?charset=utf8mb4" \
-alembic revision --autogenerate -m "init"
+#!/usr/bin/env bash
+set -euo pipefail
 
-# 应用最新迁移
-DATABASE_URL="mysql+aiomysql://user:123456@18.170.57.90:3306/ais?charset=utf8mb4" \
-alembic upgrade head
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-uvicorn app.main:app --reload --host 0.0.0.0 --port 2222 --http h11
-
+sudo install -m 0644 "$ROOT_DIR/systemd/ais-backend.service" /etc/systemd/system/ais-backend.service
+sudo systemctl daemon-reload
+sudo systemctl enable ais-backend.service
+sudo systemctl restart ais-backend.service
+sudo systemctl --no-pager --full status ais-backend.service
