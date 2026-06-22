@@ -10,6 +10,7 @@ from modules.rag.router import router as rag_router
 from modules.auth.router import router as auth_router
 from modules.role.router import router as role_router
 from modules.communication.router import router as communication_router
+from modules.communication.world_router import router as world_router
 from core.security.middleware import attach_user_from_token
 
 app = FastAPI(title="Minimal Layered FastAPI")
@@ -52,3 +53,4 @@ app.include_router(rag_router)
 app.include_router(auth_router)
 app.include_router(role_router)
 app.include_router(communication_router)
+app.include_router(world_router)

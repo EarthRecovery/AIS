@@ -5,6 +5,7 @@
       <div class="sidebar__top">
         <n-button text class="back" @click="goSingle">← 单人对话</n-button>
         <div class="title">多人剧场</div>
+        <n-button size="tiny" @click="$router.push('/world')">⚙ 世界管理</n-button>
       </div>
 
       <div class="section">
