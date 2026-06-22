@@ -15,6 +15,16 @@ class LLMClient:
 
     async def summarize_messages(self, messages):
         return await self.agent.summarize_messages(messages)
+
+    # ---- communication：多人格群聊 ----
+    async def group_chat_stream(self, persona_settings, worldview_text, scenario, roster, transcript):
+        async for chunk in self.agent.get_group_response_astream(
+            persona_settings, worldview_text, scenario, roster, transcript
+        ):
+            yield chunk
+
+    async def choose_next_speaker(self, roster, transcript, last_speaker=None):
+        return await self.agent.choose_next_speaker(roster, transcript, last_speaker)
     
     async def start_new_chat(self):
         self.agent.start_new_turn()

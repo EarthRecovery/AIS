@@ -162,3 +162,105 @@ class LLMAgent():
         ]
         summary_msg = await summary_llm.ainvoke(summary_prompt)
         return getattr(summary_msg, "content", "") or ""
+
+    # ------------------------------------------------------------------
+    # communication：多人格 + 共享世界观
+    # ------------------------------------------------------------------
+    def _build_group_prompt(self, persona_settings, worldview_text, scenario, roster, transcript):
+        """组装某个人格在多人房间里的发言 prompt。
+
+        复用 base_prompt + role_prompt.j2(已含 worldview/scenario 槽位)，
+        再叠加「在场角色名单」「只扮演本角色」的群聊规则，最后附上带发言者
+        标签的多人对话记录。共享世界观就是这里注入到每个人格 prompt 的同一段文本。
+        """
+        persona = dict(persona_settings or {})
+        if worldview_text:
+            persona["worldview"] = worldview_text
+        if scenario:
+            persona["scenario"] = scenario
+        self_name = persona.get("name") or "你"
+
+        roster_lines = "\n".join(
+            f"- {r['name']}：{(r.get('description') or '（无额外设定）')}" for r in roster
+        ) or "- （只有你一人在场）"
+
+        rules = (
+            "这是一个多人角色扮演对话场景，多个角色共处于同一个世界观之下。\n"
+            f"在场角色：\n{roster_lines}\n\n"
+            f"现在轮到你发言，你只能扮演「{self_name}」。\n"
+            f"- 只输出「{self_name}」本人的台词，符合其性格、说话方式与共享世界观\n"
+            "- 不要替其他角色或用户发言，不要写旁白或解说\n"
+            "- 自然地回应上文、推进剧情，可以与其他在场角色互动\n"
+            f"- 直接说台词，不要在台词前加「{self_name}：」这样的名字前缀"
+        )
+
+        msgs: List[BaseMessage] = [
+            base_prompt_run(),
+            SystemMessage(content=load_role_prompt(persona)),
+            SystemMessage(content=rules),
+        ]
+        if transcript:
+            lines = "\n".join(f"{t['speaker_name']}：{t['content']}" for t in transcript)
+            msgs.append(
+                HumanMessage(
+                    content=f"【已发生的对话】\n{lines}\n\n请以「{self_name}」的身份接着说："
+                )
+            )
+        else:
+            msgs.append(
+                HumanMessage(
+                    content=f"现在由你「{self_name}」开场，依据世界观与当前场景说出第一句话。"
+                )
+            )
+        return msgs
+
+    async def get_group_response_astream(
+        self, persona_settings, worldview_text, scenario, roster, transcript
+    ):
+        """某个人格在房间里的流式发言（群聊不走工具循环，保持轻量）。"""
+        work = self._build_group_prompt(
+            persona_settings, worldview_text, scenario, roster, transcript
+        )
+        async for chunk in self.llm.astream(work):
+            if chunk.content:
+                yield chunk.content
+
+    async def choose_next_speaker(self, roster, transcript, last_speaker=None):
+        """导演：根据剧情从在场角色里挑下一个发言者，返回角色名。"""
+        names = [r["name"] for r in roster if r.get("name")]
+        if not names:
+            return None
+        if len(names) == 1:
+            return names[0]
+
+        tail = transcript[-12:] if transcript else []
+        convo = "\n".join(f"{t['speaker_name']}：{t['content']}" for t in tail) or "（暂无对话，需要有人开场）"
+        director = ChatOpenAI(model="gpt-4.1", temperature=0)
+        msgs = [
+            SystemMessage(
+                content=(
+                    "你是多人对话场景的导演。根据剧情发展，从在场角色中选出下一个"
+                    "最适合发言的角色，让对话自然、有来有回。只返回一个角色名，不要解释。"
+                )
+            ),
+            HumanMessage(
+                content=(
+                    f"在场角色：{('、'.join(names))}\n"
+                    f"上一个发言者：{last_speaker or '无'}（尽量不要连续选同一个人）\n\n"
+                    f"最近对话：\n{convo}\n\n下一个发言者（只返回角色名）："
+                )
+            ),
+        ]
+        try:
+            resp = await director.ainvoke(msgs)
+            text = (getattr(resp, "content", "") or "").strip()
+        except Exception:
+            text = ""
+        for n in names:
+            if n and n in text:
+                return n
+        # 兜底：轮流，避免连续同一人
+        for n in names:
+            if n != last_speaker:
+                return n
+        return names[0]

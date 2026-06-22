@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/store/auth'
 import MainPage from '@/views/MainPage.vue'
 import AuthView from '@/views/AuthView.vue'
+import CommunicationPage from '@/views/CommunicationPage.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -9,6 +10,7 @@ const router = createRouter({
     { path: '/', redirect: '/login' },
     { path: '/login', name: 'login', component: AuthView, meta: { guestOnly: true } },
     { path: '/app', name: 'app', component: MainPage, meta: { requiresAuth: true } },
+    { path: '/communication', name: 'communication', component: CommunicationPage, meta: { requiresAuth: true } },
     { path: '/:pathMatch(.*)*', redirect: '/login' },
   ],
 })
