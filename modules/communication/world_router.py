@@ -34,8 +34,20 @@ def s_ability(a):
             "description": a.description, "level": a.level}
 
 def s_belief(b):
-    return {"id": b.id, "holder_character_id": b.holder_character_id, "subject_type": b.subject_type,
+    # b 是 AgentMemory(kind='belief')；对外仍以 holder_character_id 暴露
+    return {"id": b.id, "holder_character_id": b.character_id, "subject_type": b.subject_type,
             "subject_id": b.subject_id, "content": b.content, "confidence": b.confidence, "is_true": b.is_true}
+
+def s_memory(m):
+    return {"id": m.id, "character_id": m.character_id, "kind": m.kind, "content": m.content,
+            "confidence": m.confidence, "is_true": m.is_true, "importance": m.importance,
+            "source_scene_id": m.source_scene_id}
+
+def s_common(c):
+    return {"id": c.id, "content": c.content}
+
+def s_sk(s):
+    return {"id": s.id, "scene_id": s.scene_id, "content": s.content, "scope": s.scope}
 
 def s_location(l):
     return {"id": l.id, "name": l.name, "type": l.type, "description": l.description,
@@ -174,7 +186,8 @@ async def get_world(world_id: int, svc: WorldService = Depends()):
         "characters": [
             {"character": s_char(b["character"]), "mental": s_mental(b["mental"]),
              "abilities": [s_ability(a) for a in b["abilities"]],
-             "beliefs": [s_belief(x) for x in b["beliefs"]]}
+             "beliefs": [s_belief(x) for x in b["beliefs"]],
+             "memories": [s_memory(m) for m in b.get("memories", [])]}
             for b in d["characters"]
         ],
         "locations": [s_location(l) for l in d["locations"]],
@@ -294,3 +307,72 @@ async def update_relationship(rel_id: int, req: RelationshipUpdate, svc: WorldSe
 @router.delete("/relationship/{rel_id}")
 async def delete_relationship(rel_id: int, svc: WorldService = Depends()):
     return {"success": await svc.delete_relationship(rel_id)}
+
+
+# ================= CommonKnowledge（世界常识，所有 agent 可见）=================
+class ContentReq(BaseModel):
+    content: str
+
+@router.post("/{world_id}/common")
+async def add_common(world_id: int, req: ContentReq, svc: WorldService = Depends()):
+    return s_common(await svc.add_common_knowledge(world_id, req.content))
+
+@router.get("/{world_id}/common")
+async def list_common(world_id: int, svc: WorldService = Depends()):
+    return {"common_knowledge": [s_common(c) for c in await svc.list_common_knowledge(world_id)]}
+
+@router.delete("/common/{ck_id}")
+async def delete_common(ck_id: int, svc: WorldService = Depends()):
+    return {"success": await svc.delete_common_knowledge(ck_id)}
+
+
+# ================= AgentMemory（角色私有记忆）=================
+class MemoryCreate(BaseModel):
+    character_id: int
+    content: str
+    kind: str | None = "memory"
+    importance: int | None = 0
+
+@router.post("/{world_id}/memory")
+async def add_memory(world_id: int, req: MemoryCreate, svc: WorldService = Depends()):
+    m = await svc.add_memory(world_id, req.character_id, req.content,
+                             kind=req.kind or "memory", importance=req.importance or 0)
+    return s_memory(m)
+
+@router.get("/character/{char_id}/memory")
+async def list_memory(char_id: int, svc: WorldService = Depends()):
+    return {"memories": [s_memory(m) for m in await svc.list_memories(char_id)]}
+
+@router.delete("/memory/{memory_id}")
+async def delete_memory(memory_id: int, svc: WorldService = Depends()):
+    return {"success": await svc.delete_memory(memory_id)}
+
+
+# ================= SceneKnowledge（场景知识，在场 agent 可获知）=================
+class SceneKnowReq(BaseModel):
+    content: str
+    scope: str | None = "public"
+
+@router.post("/scene/{scene_id}/knowledge")
+async def add_scene_knowledge(scene_id: int, req: SceneKnowReq, svc: WorldService = Depends()):
+    return s_sk(await svc.add_scene_knowledge(scene_id, req.content, req.scope or "public"))
+
+@router.get("/scene/{scene_id}/knowledge")
+async def list_scene_knowledge(scene_id: int, svc: WorldService = Depends()):
+    return {"scene_knowledge": [s_sk(s) for s in await svc.list_scene_knowledge(scene_id)]}
+
+@router.delete("/scene-knowledge/{sk_id}")
+async def delete_scene_knowledge(sk_id: int, svc: WorldService = Depends()):
+    return {"success": await svc.delete_scene_knowledge(sk_id)}
+
+
+# ================= 感知视图 & Keeper =================
+@router.get("/{world_id}/character/{char_id}/perception")
+async def get_perception(world_id: int, char_id: int, scene_id: int | None = None,
+                         svc: WorldService = Depends()):
+    return await svc.build_perception(world_id, char_id, scene_id)
+
+@router.post("/scene/{scene_id}/keeper")
+async def keeper_digest(scene_id: int, svc: WorldService = Depends()):
+    """记录官消化一个场景：写各在场角色的私有记忆，并决定是否切换场景。"""
+    return await svc.keeper_digest_scene(scene_id)

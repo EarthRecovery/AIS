@@ -166,7 +166,35 @@ class LLMAgent():
     # ------------------------------------------------------------------
     # communication：多人格 + 共享世界观
     # ------------------------------------------------------------------
-    def _build_group_prompt(self, persona_settings, worldview_text, scenario, roster, transcript):
+    @staticmethod
+    def _perception_block(self_name, perception) -> str:
+        """把某角色的感知视图(世界常识 + 私有记忆/认知 + 场景知识)渲染成提示。
+
+        注意：只渲染 content/kind/置信度，绝不暴露 is_true(那是作者元信息)。
+        """
+        if not perception:
+            return ""
+        commons = perception.get("common_knowledge") or []
+        memories = perception.get("memories") or []
+        scene_k = perception.get("scene_knowledge") or []
+        lines = [f"以下是「{self_name}」此刻所知道的一切——你只能依据这些信息行动，"
+                 "不要使用你不可能知道的事，也不要读取其他角色的内心或私有记忆。"]
+        if commons:
+            lines.append("【世界常识】\n" + "\n".join(f"- {c}" for c in commons))
+        if memories:
+            mem_lines = []
+            for m in memories:
+                tag = m.get("kind", "memory")
+                conf = m.get("confidence")
+                prefix = f"（{tag}{'，信心'+str(conf) if conf is not None else ''}）"
+                mem_lines.append(f"- {prefix}{m.get('content','')}")
+            lines.append("【你的记忆与认知】\n" + "\n".join(mem_lines))
+        if scene_k:
+            lines.append("【当前场景你已获知】\n" + "\n".join(f"- {s}" for s in scene_k))
+        return "\n\n".join(lines)
+
+    def _build_group_prompt(self, persona_settings, worldview_text, scenario, roster, transcript,
+                            perception=None):
         """组装某个人格在多人房间里的发言 prompt。
 
         复用 base_prompt + role_prompt.j2(已含 worldview/scenario 槽位)，
@@ -199,6 +227,9 @@ class LLMAgent():
             SystemMessage(content=load_role_prompt(persona)),
             SystemMessage(content=rules),
         ]
+        perception_text = self._perception_block(self_name, perception)
+        if perception_text:
+            msgs.append(SystemMessage(content=perception_text))
         if transcript:
             lines = "\n".join(f"{t['speaker_name']}：{t['content']}" for t in transcript)
             msgs.append(
@@ -215,11 +246,11 @@ class LLMAgent():
         return msgs
 
     async def get_group_response_astream(
-        self, persona_settings, worldview_text, scenario, roster, transcript
+        self, persona_settings, worldview_text, scenario, roster, transcript, perception=None
     ):
         """某个人格在房间里的流式发言（群聊不走工具循环，保持轻量）。"""
         work = self._build_group_prompt(
-            persona_settings, worldview_text, scenario, roster, transcript
+            persona_settings, worldview_text, scenario, roster, transcript, perception
         )
         async for chunk in self.llm.astream(work):
             if chunk.content:

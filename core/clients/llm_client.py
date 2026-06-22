@@ -1,9 +1,11 @@
 from core.agent.agent import LLMAgent
+from core.agent.keeper import KeeperAgent
 
 class LLMClient:
-    
+
     def __init__(self):
         self.agent = LLMAgent()
+        self.keeper = KeeperAgent()
         # self.agent.start_new_turn()
 
     async def chat(self, message: str, history_id: int, role_settings=None) -> str:
@@ -25,6 +27,17 @@ class LLMClient:
 
     async def choose_next_speaker(self, roster, transcript, last_speaker=None):
         return await self.agent.choose_next_speaker(roster, transcript, last_speaker)
+
+    async def group_chat_stream_perceived(self, persona_settings, worldview_text, scenario,
+                                          roster, transcript, perception):
+        async for chunk in self.agent.get_group_response_astream(
+            persona_settings, worldview_text, scenario, roster, transcript, perception
+        ):
+            yield chunk
+
+    # ---- Keeper：记忆管控 + 场景切换决策 ----
+    async def keeper_digest(self, world_common, scene_setting, participants, transcript):
+        return await self.keeper.digest_scene(world_common, scene_setting, participants, transcript)
     
     async def start_new_chat(self):
         self.agent.start_new_turn()

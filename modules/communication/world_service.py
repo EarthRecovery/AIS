@@ -10,14 +10,21 @@ from fastapi import Depends
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.clients.llm_client import LLMClient
+from modules.deps import get_llm_client
 from storage.db import get_db
 from storage.models.ability import Ability
-from storage.models.belief import Belief
+from storage.models.agent_memory import AgentMemory
 from storage.models.character import Character
+from storage.models.common_knowledge import CommonKnowledge
 from storage.models.item import Item
 from storage.models.location import Location
 from storage.models.mental_state import MentalState
 from storage.models.relationship import Relationship
+from storage.models.scene import Scene
+from storage.models.scene_knowledge import SceneKnowledge
+from storage.models.scene_message import SceneMessage
+from storage.models.scene_participant import SceneParticipant
 from storage.models.world import World
 from storage.models.world_event import WorldEvent
 from storage.models.worldview import Worldview
@@ -31,7 +38,8 @@ def _apply(obj, data: dict):
 
 
 class WorldService:
-    def __init__(self, db: AsyncSession = Depends(get_db)):
+    def __init__(self, llm: LLMClient = Depends(get_llm_client), db: AsyncSession = Depends(get_db)):
+        self.llm = llm
         self.db = db
 
     async def _get(self, model, id_):
@@ -90,7 +98,8 @@ class WorldService:
         return w
 
     async def delete_world(self, world_id) -> bool:
-        for model in (WorldEvent, Belief, Ability, MentalState, Relationship, Item, Location, Character):
+        for model in (WorldEvent, AgentMemory, CommonKnowledge, Ability, MentalState,
+                      Relationship, Item, Location, Character):
             await self.db.execute(delete(model).where(model.world_id == world_id)
                                   if hasattr(model, "world_id")
                                   else delete(model).where(model.character_id.in_(
@@ -138,7 +147,7 @@ class WorldService:
             return False
         await self.db.execute(delete(Ability).where(Ability.character_id == char_id))
         await self.db.execute(delete(MentalState).where(MentalState.character_id == char_id))
-        await self.db.execute(delete(Belief).where(Belief.holder_character_id == char_id))
+        await self.db.execute(delete(AgentMemory).where(AgentMemory.character_id == char_id))
         await self.db.execute(delete(Character).where(Character.id == char_id))
         await self.db.commit()
         return True
@@ -182,26 +191,180 @@ class WorldService:
         await self.db.commit()
         return True
 
-    # ---- Belief（主观认知）----
+    # ---- Belief / AgentMemory（角色私有记忆，belief 为其中一种 kind）----
     async def create_belief(self, world_id, data: dict):
-        return await self._save(Belief(world_id=world_id, **{k: v for k, v in data.items() if v is not None}))
+        d = dict(data)
+        holder = d.pop("holder_character_id", None)
+        return await self._save(AgentMemory(
+            world_id=world_id, character_id=holder, kind="belief",
+            **{k: v for k, v in d.items() if v is not None}))
 
     async def update_belief(self, belief_id, data: dict):
-        b = await self._get(Belief, belief_id)
+        b = await self._get(AgentMemory, belief_id)
         if not b:
             return None
         _apply(b, data)
         await self.db.commit()
         await self.db.refresh(b)
         await self.log_event(b.world_id, "belief_update", "认知更新",
-                             {"belief_id": belief_id, "after": data},
-                             actor=b.holder_character_id, in_world_time=await self._world_time(b.world_id))
+                             {"memory_id": belief_id, "after": data},
+                             actor=b.character_id, in_world_time=await self._world_time(b.world_id))
         return b
 
     async def delete_belief(self, belief_id):
-        await self.db.execute(delete(Belief).where(Belief.id == belief_id))
+        await self.db.execute(delete(AgentMemory).where(AgentMemory.id == belief_id))
         await self.db.commit()
         return True
+
+    # ---- AgentMemory（通用：记忆/事实/观察等任意 kind）----
+    async def add_memory(self, world_id, character_id, content, kind="memory",
+                         source_scene_id=None, importance=0, log=True):
+        m = await self._save(AgentMemory(
+            world_id=world_id, character_id=character_id, kind=kind,
+            content=content, source_scene_id=source_scene_id, importance=importance))
+        if log:
+            await self.log_event(world_id, "memory_write", f"角色 #{character_id} 记住了一条 {kind}",
+                                 {"memory_id": m.id, "content": content[:120]},
+                                 actor=character_id, in_world_time=await self._world_time(world_id))
+        return m
+
+    async def list_memories(self, character_id):
+        res = await self.db.execute(
+            select(AgentMemory).where(AgentMemory.character_id == character_id)
+            .order_by(AgentMemory.id.desc()))
+        return res.scalars().all()
+
+    async def delete_memory(self, memory_id):
+        await self.db.execute(delete(AgentMemory).where(AgentMemory.id == memory_id))
+        await self.db.commit()
+        return True
+
+    # ---- CommonKnowledge（世界常识，所有 agent 可见）----
+    async def add_common_knowledge(self, world_id, content):
+        return await self._save(CommonKnowledge(world_id=world_id, content=content))
+
+    async def list_common_knowledge(self, world_id):
+        res = await self.db.execute(
+            select(CommonKnowledge).where(CommonKnowledge.world_id == world_id)
+            .order_by(CommonKnowledge.id.desc()))
+        return res.scalars().all()
+
+    async def delete_common_knowledge(self, ck_id):
+        await self.db.execute(delete(CommonKnowledge).where(CommonKnowledge.id == ck_id))
+        await self.db.commit()
+        return True
+
+    # ---- SceneKnowledge（场景知识，在场 agent 可获知）----
+    async def add_scene_knowledge(self, scene_id, content, scope="public"):
+        return await self._save(SceneKnowledge(scene_id=scene_id, content=content, scope=scope))
+
+    async def list_scene_knowledge(self, scene_id):
+        res = await self.db.execute(
+            select(SceneKnowledge).where(SceneKnowledge.scene_id == scene_id)
+            .order_by(SceneKnowledge.id.desc()))
+        return res.scalars().all()
+
+    async def delete_scene_knowledge(self, sk_id):
+        await self.db.execute(delete(SceneKnowledge).where(SceneKnowledge.id == sk_id))
+        await self.db.commit()
+        return True
+
+    # ---- 感知视图：喂给某 agent 的、它"该知道"的信息 ----
+    async def build_perception(self, world_id, character_id, scene_id=None):
+        """构造某角色的感知切片：世界常识(公共) + 自己的私有记忆/认知 + 当前场景知识。"""
+        commons = await self.list_common_knowledge(world_id)
+        memories = await self.list_memories(character_id)
+        scene_k = await self.list_scene_knowledge(scene_id) if scene_id else []
+        return {
+            "common_knowledge": [c.content for c in commons],
+            "memories": [{"kind": m.kind, "content": m.content,
+                          "confidence": m.confidence, "is_true": m.is_true} for m in memories],
+            "scene_knowledge": [s.content for s in scene_k],
+        }
+
+    # ---- 角色按名查找（Keeper 把名字解析回 character_id）----
+    async def character_by_name(self, world_id, name):
+        res = await self.db.execute(
+            select(Character).where(Character.world_id == world_id, Character.name == name))
+        return res.scalars().first()
+
+    async def world_common_texts(self, world_id):
+        """世界级公共可见信息：世界观散文 + 常识条目。"""
+        texts = []
+        w = await self._get(World, world_id)
+        if w and w.worldview_id:
+            wv = await self._get(Worldview, w.worldview_id)
+            if wv:
+                if wv.description:
+                    texts.append(wv.description.strip())
+                if wv.rules:
+                    texts.append("【世界规则】" + wv.rules.strip())
+        for c in await self.list_common_knowledge(world_id):
+            texts.append(c.content)
+        return texts
+
+    # ---- Keeper：消化场景 → 写各角色记忆 + 决定场景切换 ----
+    async def keeper_digest_scene(self, scene_id):
+        scene = await self._get(Scene, scene_id)
+        if scene is None or not scene.world_id:
+            return {"error": "需要一个属于某世界的场景"}
+        world_id = scene.world_id
+
+        common = await self.world_common_texts(world_id)
+        parts = (await self.db.execute(
+            select(SceneParticipant).where(SceneParticipant.scene_id == scene_id))).scalars().all()
+        participant_names = [p.role_name for p in parts]
+        msgs = (await self.db.execute(
+            select(SceneMessage).where(SceneMessage.scene_id == scene_id)
+            .order_by(SceneMessage.timestamp, SceneMessage.id))).scalars().all()
+        transcript = [{"speaker_name": m.speaker_name, "content": m.content} for m in msgs]
+
+        digest = await self.llm.keeper_digest(common, scene.scenario, participant_names, transcript)
+
+        # 1) 写各角色记忆
+        written = 0
+        for mem in digest.get("memories", []):
+            ch = await self.character_by_name(world_id, mem.get("character", ""))
+            if ch is None:
+                continue
+            await self.add_memory(world_id, ch.id, mem.get("content", ""),
+                                  kind=mem.get("kind", "memory"), source_scene_id=scene_id,
+                                  importance=int(mem.get("importance", 0) or 0), log=False)
+            written += 1
+
+        # 2) 场景切换决策
+        scene_decision = digest.get("scene", {}) or {}
+        next_scene_id = None
+        if scene_decision.get("should_switch"):
+            scene.status = "ended"
+            scene.ended_at = func.now()
+            await self.db.commit()
+            nxt = scene_decision.get("next", {}) or {}
+            new_scene = Scene(user_id=scene.user_id, world_id=world_id,
+                              worldview_id=scene.worldview_id,
+                              name=nxt.get("name", "新场景"), scenario=nxt.get("setting", ""),
+                              prev_scene_id=scene_id)
+            new_scene = await self._save(new_scene)
+            for order, nm in enumerate(nxt.get("participants", []) or []):
+                ch = await self.character_by_name(world_id, nm)
+                self.db.add(SceneParticipant(
+                    scene_id=new_scene.id, role_id=(ch.role_id if ch else None),
+                    character_id=(ch.id if ch else None), role_name=nm, display_order=order))
+            await self.db.commit()
+            next_scene_id = new_scene.id
+            await self.log_event(world_id, "scene_change",
+                                 f"场景切换：{scene.name} → {new_scene.name}",
+                                 {"from": scene_id, "to": next_scene_id,
+                                  "reason": scene_decision.get("reason", "")},
+                                 in_world_time=await self._world_time(world_id))
+
+        await self.log_event(world_id, "keeper_digest",
+                             f"记录官消化场景「{scene.name}」，写入 {written} 条记忆",
+                             {"scene_id": scene_id, "memories_written": written,
+                              "switched": bool(next_scene_id)},
+                             in_world_time=await self._world_time(world_id))
+        return {"memories_written": written, "switched": bool(next_scene_id),
+                "next_scene_id": next_scene_id, "decision": scene_decision}
 
     # ============ Location ============
     async def create_location(self, world_id, data: dict):
@@ -293,9 +456,12 @@ class WorldService:
         for c in characters:
             mental = await self.get_mental(c.id)
             abilities = await self._all(Ability, character_id=c.id)
-            beliefs = (await self.db.execute(
-                select(Belief).where(Belief.holder_character_id == c.id))).scalars().all()
-            char_blocks.append({"character": c, "mental": mental, "abilities": abilities, "beliefs": beliefs})
+            memories = (await self.db.execute(
+                select(AgentMemory).where(AgentMemory.character_id == c.id)
+                .order_by(AgentMemory.id.desc()))).scalars().all()
+            beliefs = [m for m in memories if m.kind == "belief"]
+            char_blocks.append({"character": c, "mental": mental, "abilities": abilities,
+                                "beliefs": beliefs, "memories": memories})
         locations = await self._all(Location, world_id=world_id)
         items = await self._all(Item, world_id=world_id)
         relationships = await self._all(Relationship, world_id=world_id)
