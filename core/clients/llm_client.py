@@ -49,6 +49,12 @@ class LLMClient:
 
     async def keeper_judge_round(self, world_context, scene_setting, round_dialogue, characters_state):
         return await self.keeper.judge_round(world_context, scene_setting, round_dialogue, characters_state)
+
+    async def keeper_consolidate(self, char_name, self_summary, mem_texts):
+        return await self.keeper.consolidate_memory(char_name, self_summary, mem_texts)
+
+    async def keeper_write_outline(self, world_context, directive=""):
+        return await self.keeper.write_outline(world_context, directive)
     
     async def start_new_chat(self):
         self.agent.start_new_turn()

@@ -274,15 +274,49 @@ class WorldService:
         return True
 
     # ---- 感知视图：喂给某 agent 的、它"该知道"的信息 ----
-    async def build_perception(self, world_id, character_id, scene_id=None):
-        """构造某角色的感知切片：世界常识(公共) + 自己的私有记忆/认知 + 当前场景知识。"""
+    async def build_perception(self, world_id, character_id, scene_id=None,
+                               recent_scenes=3, short_cap=10, long_cap=8):
+        """构造某角色的感知切片：世界常识 + 短期记忆(最近几个场景) + 长期记忆(重要的事)
+        + 自我认知 + 当前场景知识。
+
+        短期记忆：最近 recent_scenes 个场景里发生的记忆（最多 short_cap 条）。
+        长期记忆：重要度较高(importance>=2)、且不在短期里的记忆（按重要度，最多 long_cap 条）。
+        """
         commons = await self.list_common_knowledge(world_id)
-        memories = await self.list_memories(character_id)
+        all_mem = await self.list_memories(character_id)  # 按 id 倒序（新→旧）
         scene_k = await self.list_scene_knowledge(scene_id) if scene_id else []
+        mental = await self.get_mental(character_id)
+
+        # 最近几个场景的 id 集合（按记忆里出现的 source_scene_id，取最近 recent_scenes 个）
+        recent_sids, seen = [], set()
+        for m in all_mem:
+            sid = m.source_scene_id
+            if sid and sid not in seen:
+                seen.add(sid)
+                recent_sids.append(sid)
+            if len(recent_sids) >= recent_scenes:
+                break
+        recent_set = set(recent_sids)
+
+        short, long = [], []
+        for m in all_mem:
+            in_recent = (m.source_scene_id in recent_set) if m.source_scene_id else False
+            if in_recent and len(short) < short_cap:
+                short.append(m)
+            elif (m.importance or 0) >= 2 and not m.consolidated and len(long) < long_cap:
+                # 已沉淀进 self_summary 的不再单独注入，避免重复且让长期记忆有界
+                long.append(m)
+        # 长期按重要度排序
+        long.sort(key=lambda m: (-(m.importance or 0), -m.id))
+
+        def ser(m):
+            return {"kind": m.kind, "content": m.content, "confidence": m.confidence}
+
         return {
             "common_knowledge": [c.content for c in commons],
-            "memories": [{"kind": m.kind, "content": m.content,
-                          "confidence": m.confidence, "is_true": m.is_true} for m in memories],
+            "self_summary": (mental.self_summary if mental else None),
+            "short_term": [ser(m) for m in short],
+            "long_term": [ser(m) for m in long],
             "scene_knowledge": [s.content for s in scene_k],
         }
 
@@ -508,7 +542,74 @@ class WorldService:
             "characters": char_ctx, "relationships": rels,
             "common_knowledge": commons, "recent_events": recent,
             "in_world_time": world.in_world_time if world else "",
+            "beat": self._current_beat(world),
         }, world, wv, chars
+
+    # ---- 剧本大纲 / 节拍 ----
+    @staticmethod
+    def _current_beat(world):
+        outline = (world.outline or []) if world else []
+        idx = world.beat_index if world else 0
+        if outline and 0 <= idx < len(outline):
+            return outline[idx]
+        return None
+
+    async def generate_outline(self, world_id, directive=""):
+        ctx, world, _, _ = await self._director_context(world_id)
+        beats = await self.llm.keeper_write_outline(ctx, directive)
+        if world is not None:
+            world.outline = beats
+            world.beat_index = 0
+            await self.db.commit()
+            await self.log_event(world_id, "outline_set", f"生成剧本大纲（{len(beats)} 个节拍）",
+                                 {"beats": [b.get("title") for b in beats]},
+                                 in_world_time=world.in_world_time)
+        return beats
+
+    async def advance_beat(self, world_id):
+        world = await self._get(World, world_id)
+        if world is None or not world.outline:
+            return None
+        if world.beat_index < len(world.outline) - 1:
+            world.beat_index += 1
+            await self.db.commit()
+            cur = self._current_beat(world)
+            await self.log_event(world_id, "beat_advance",
+                                 f"剧情推进到节拍：{cur.get('title') if cur else ''}",
+                                 {"beat_index": world.beat_index}, in_world_time=world.in_world_time)
+            return cur
+        return None
+
+    # ---- 记忆沉淀：把旧的零散记忆压进角色的长期自我认知 ----
+    async def consolidate_character(self, character_id, keep_scene_ids, threshold=8):
+        c = await self._get(Character, character_id)
+        if c is None:
+            return False
+        res = await self.db.execute(
+            select(AgentMemory).where(AgentMemory.character_id == character_id,
+                                      AgentMemory.consolidated == False)  # noqa: E712
+            .order_by(AgentMemory.id))
+        mems = res.scalars().all()
+        keep = set(keep_scene_ids or [])
+        older = [m for m in mems if (m.source_scene_id not in keep)]
+        if len(older) < threshold:
+            return False
+        ms = await self.get_mental(character_id)
+        cur_summary = ms.self_summary if ms else ""
+        new_summary = await self.llm.keeper_consolidate(c.name, cur_summary, [m.content for m in older])
+        # 直接写 self_summary（不走 upsert_mental，避免刷一堆 mental_update 事件）
+        if ms is None:
+            ms = MentalState(character_id=character_id)
+            self.db.add(ms)
+        ms.self_summary = new_summary
+        for m in older:
+            m.consolidated = True
+        await self.db.commit()
+        await self.log_event(c.world_id, "memory_consolidate",
+                             f"{c.name} 把 {len(older)} 条旧记忆沉淀进长期记忆",
+                             {"count": len(older)}, actor=character_id,
+                             in_world_time=await self._world_time(c.world_id))
+        return True
 
     @staticmethod
     def _row(obj, fields):

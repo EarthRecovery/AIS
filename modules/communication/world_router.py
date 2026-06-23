@@ -1,8 +1,10 @@
 """持久世界管理 API：World 及其所有从属实体的增删改查。"""
 
+import json
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from core.security.deps import get_request_user_id
@@ -416,6 +418,14 @@ async def sim_open_scene(world_id: int, req: SimDirective, svc: SimulationServic
 async def sim_step(world_id: int, req: SimDirective, svc: SimulationService = Depends()):
     return await svc.step_round(world_id, req.directive or "")
 
+@router.post("/{world_id}/sim/step/stream")
+async def sim_step_stream(world_id: int, req: SimDirective, svc: SimulationService = Depends()):
+    async def gen():
+        async for ev in svc.step_round_stream(world_id, req.directive or ""):
+            yield f"data: {json.dumps(ev, ensure_ascii=False)}\r\n\r\n"
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"})
+
 @router.post("/{world_id}/sim/run-day")
 async def sim_run_day(world_id: int, req: SimDirective, svc: SimulationService = Depends()):
     return await svc.run_day(world_id, req.directive or "")
@@ -423,3 +433,14 @@ async def sim_run_day(world_id: int, req: SimDirective, svc: SimulationService =
 @router.post("/{world_id}/sim/rollback-day")
 async def sim_rollback(world_id: int, svc: SimulationService = Depends()):
     return await svc.rollback_day(world_id)
+
+@router.get("/scene/{scene_id}/messages")
+async def sim_scene_messages(scene_id: int, svc: SimulationService = Depends()):
+    return await svc.scene_messages(scene_id)
+
+
+# ================= 剧本大纲 =================
+@router.post("/{world_id}/outline/generate")
+async def outline_generate(world_id: int, req: SimDirective, svc: WorldService = Depends()):
+    beats = await svc.generate_outline(world_id, req.directive or "")
+    return {"outline": beats}

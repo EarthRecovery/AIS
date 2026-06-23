@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, func
+from sqlalchemy import JSON, DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from storage.db import Base
@@ -24,6 +24,10 @@ class World(Base):
     in_world_time: Mapped[str] = mapped_column(String(50), nullable=False, default="第1天 清晨")
     # active / paused / archived
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    # 剧本大纲：[{title, goal}, ...]，指导长线推演不漂移、能收束到结局
+    outline: Mapped[list] = mapped_column(JSON, nullable=True)
+    # 当前推进到第几个节拍(对应 outline 下标)
+    beat_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

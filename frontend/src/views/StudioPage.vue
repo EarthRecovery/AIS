@@ -18,6 +18,23 @@
           <div class="section__title"><n-icon><TimeOutline /></n-icon> {{ store.world.in_world_time }}</div>
         </div>
 
+        <div v-if="store.worldId" class="section">
+          <div class="section__title">
+            <span><n-icon><BookOutline /></n-icon> 剧本大纲</span>
+            <n-button size="tiny" :loading="genning" @click="genOutline">
+              {{ store.outline.length ? '重写' : '生成' }}
+            </n-button>
+          </div>
+          <div v-if="store.outline.length" class="beats">
+            <div v-for="(b, i) in store.outline" :key="i" class="beat"
+              :class="{ 'beat--cur': i === store.beatIndex, 'beat--done': i < store.beatIndex }">
+              <span class="beat__no">{{ i + 1 }}</span>
+              <span class="beat__title">{{ b.title }}</span>
+            </div>
+          </div>
+          <div v-else class="hint">点「生成」让编剧写一条主线，推演不跑偏</div>
+        </div>
+
         <div class="section section--chars" v-if="store.worldId">
           <div class="section__title"><n-icon><PeopleOutline /></n-icon> 角色状态</div>
           <n-scrollbar style="flex:1; min-height:0">
@@ -54,7 +71,10 @@
                 </n-tag>
               </div>
               <div v-if="s.scenario" class="scene__setting">{{ s.scenario }}</div>
-              <div class="dialogue">
+              <div v-if="s.collapsed" class="scene__collapsed" @click="store.expandScene(s.id)">
+                ▸ 展开本幕对话（{{ s.message_count }} 句）
+              </div>
+              <div v-else class="dialogue">
                 <div v-for="(m, i) in s.messages" :key="i" class="line">
                   <span class="avatar avatar--sm" :style="{ background: nameColor(m.speaker_name) }">{{ first(m.speaker_name) }}</span>
                   <div class="line__body">
@@ -105,7 +125,7 @@ import { computed, onMounted, ref, watch, nextTick } from 'vue'
 import { NSelect, NScrollbar, NButton, NInput, NIcon, NTag, useMessage } from 'naive-ui'
 import {
   PlanetOutline, TimeOutline, PeopleOutline, PlayOutline,
-  PlayForwardOutline, FlashOutline, ArrowUndoOutline,
+  PlayForwardOutline, FlashOutline, ArrowUndoOutline, BookOutline,
 } from '@vicons/ionicons5'
 import { useStudioStore } from '@/store/Studio'
 import AppNav from '@/components/AppNav.vue'
@@ -114,6 +134,21 @@ const store = useStudioStore()
 const message = useMessage()
 const directive = ref('')
 const stageRef = ref(null)
+const genning = ref(false)
+
+const genOutline = async () => {
+  if (genning.value) return
+  genning.value = true
+  try {
+    await store.generateOutline(directive.value)
+    message.success('剧本大纲已生成')
+  } catch (e) {
+    console.error('gen outline failed', e)
+    message.error('生成大纲失败，请重试')
+  } finally {
+    genning.value = false
+  }
+}
 
 const worldOptions = computed(() => store.worlds.map((w) => ({ label: w.name, value: w.id })))
 
@@ -137,13 +172,19 @@ watch(() => store.scenes.map((s) => s.messages.length).join(','), scrollBottom)
 
 const step = async () => {
   try {
-    const r = await store.step(directive.value)
-    if (r?.data?.error) message.error(r.data.error)
+    const dir = directive.value
     directive.value = ''
+    // 流式：边生成边冒出；每隔一会儿滚到底
+    const timer = setInterval(scrollBottom, 300)
+    try {
+      await store.stepStream(dir)
+    } finally {
+      clearInterval(timer)
+    }
     scrollBottom()
   } catch (e) {
     console.error('step failed', e)
-    message.error(e?.code === 'ECONNABORTED' ? '本轮推演超时，请重试' : '推演失败，请重试')
+    message.error('推演失败，请重试')
   }
 }
 const nextScene = async () => {
@@ -196,6 +237,18 @@ onMounted(() => store.fetchWorlds())
 .bar { flex: 1; height: 6px; background: rgba(255,255,255,0.12); border-radius: 4px; overflow: hidden; }
 .bar__fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
 .hint { color: #94a3b8; font-size: 12px; }
+.section__title { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.beats { display: flex; flex-direction: column; gap: 4px; }
+.beat { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #9aa4b8;
+  padding: 4px 8px; border-radius: 8px; }
+.beat__no { width: 18px; height: 18px; border-radius: 50%; background: rgba(255,255,255,0.1);
+  display: flex; align-items: center; justify-content: center; font-size: 11px; flex: 0 0 auto; }
+.beat__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.beat--cur { background: var(--c-primary); color: #fff; }
+.beat--cur .beat__no { background: rgba(255,255,255,0.25); }
+.beat--done { color: #6b7280; text-decoration: line-through; }
+.scene__collapsed { color: var(--c-primary); font-size: 13px; cursor: pointer; padding: 6px 0; }
+.scene__collapsed:hover { text-decoration: underline; }
 
 .main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; background: var(--c-bg); }
 .stage { flex: 1; min-height: 0; padding: 20px 28px; }

@@ -175,20 +175,27 @@ class LLMAgent():
         if not perception:
             return ""
         commons = perception.get("common_knowledge") or []
-        memories = perception.get("memories") or []
+        self_summary = perception.get("self_summary")
+        long_term = perception.get("long_term") or []
+        short_term = perception.get("short_term") or []
         scene_k = perception.get("scene_knowledge") or []
+
+        def fmt(m):
+            tag = m.get("kind", "memory")
+            conf = m.get("confidence")
+            prefix = f"（{tag}{'，信心'+str(conf) if conf is not None else ''}）"
+            return f"- {prefix}{m.get('content','')}"
+
         lines = [f"以下是「{self_name}」此刻所知道的一切——你只能依据这些信息行动，"
                  "不要使用你不可能知道的事，也不要读取其他角色的内心或私有记忆。"]
         if commons:
             lines.append("【世界常识】\n" + "\n".join(f"- {c}" for c in commons))
-        if memories:
-            mem_lines = []
-            for m in memories:
-                tag = m.get("kind", "memory")
-                conf = m.get("confidence")
-                prefix = f"（{tag}{'，信心'+str(conf) if conf is not None else ''}）"
-                mem_lines.append(f"- {prefix}{m.get('content','')}")
-            lines.append("【你的记忆与认知】\n" + "\n".join(mem_lines))
+        if self_summary:
+            lines.append("【你的自我认知（长期）】\n" + self_summary)
+        if long_term:
+            lines.append("【长期记忆（你印象深刻的事）】\n" + "\n".join(fmt(m) for m in long_term))
+        if short_term:
+            lines.append("【近期记忆（最近几个场景发生的）】\n" + "\n".join(fmt(m) for m in short_term))
         if scene_k:
             lines.append("【当前场景你已获知】\n" + "\n".join(f"- {s}" for s in scene_k))
         return "\n\n".join(lines)

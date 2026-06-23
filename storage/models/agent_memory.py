@@ -36,6 +36,8 @@ class AgentMemory(Base):
     # 来源场景；重要度用于检索/遗忘
     source_scene_id: Mapped[int] = mapped_column(Integer, nullable=True)
     importance: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 是否已被沉淀进角色的长期自我认知(self_summary)，沉淀后不再单独注入 prompt
+    consolidated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

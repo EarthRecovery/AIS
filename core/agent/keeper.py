@@ -29,6 +29,23 @@ def _parse_json(text: str) -> dict:
         return {}
 
 
+def _parse_json_array(text: str) -> list:
+    """容错解析 LLM 返回的 JSON 数组。"""
+    t = (text or "").strip()
+    if t.startswith("```"):
+        t = t.strip("`")
+        if t.lower().startswith("json"):
+            t = t[4:]
+    start, end = t.find("["), t.rfind("]")
+    if start != -1 and end != -1:
+        t = t[start : end + 1]
+    try:
+        data = json.loads(t)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
 class KeeperAgent:
     def __init__(self):
         self.llm = ChatOpenAI(model="gpt-4.1", temperature=0)
@@ -164,8 +181,13 @@ class KeeperAgent:
             prev_block = "（这是今天的第一幕）"
             continuity = "请为这一天开启第一幕。"
 
+        beat = world_context.get("beat")
+        beat_block = (f"【当前剧本节拍】{beat.get('title','')}：{beat.get('goal','')}\n"
+                      "让这一幕朝这个节拍推进。\n" if beat else "")
+
         sys = SystemMessage(content=(
             "你是持久世界的「世界导演」。" + continuity +
+            "若有剧本节拍，让这一幕服务于该节拍、把主线往前推。"
             "选择地点/情境，并挑选在场角色——通常 2 人或以上；"
             "但若是主角/重要角色独处、内心戏或单人行动，可以只有 1 人。"
             "只输出 JSON：{\"name\":\"场景名\",\"setting\":\"情境(一两句，交代清楚和上一幕怎么衔接)\","
@@ -173,7 +195,7 @@ class KeeperAgent:
         ))
         human = HumanMessage(content=(
             f"【世界观】{wv.get('description') or ''}\n【背景(仅你可见)】{wv.get('background') or ''}\n"
-            f"【可用角色】\n{char_lines}\n{prev_block}\n"
+            f"{beat_block}【可用角色】\n{char_lines}\n{prev_block}\n"
             f"【导演指示】{directive.strip() or '（无）'}\n请输出场景 JSON。"
         ))
         try:
@@ -187,6 +209,48 @@ class KeeperAgent:
         data.setdefault("setting", "")
         return data
 
+    async def consolidate_memory(self, char_name, self_summary, mem_texts):
+        """把角色已有的长期自我认知 + 一批较旧的零散记忆，压缩成一段连贯的长期记忆。"""
+        bullets = "\n".join(f"- {t}" for t in mem_texts) or "（无）"
+        sys = SystemMessage(content=(
+            "你是角色的记忆整理者。把【已有长期记忆】和【一批较旧的零散记忆】合并成一段"
+            "简洁、连贯的第一人称长期记忆/自我认知：保留关键事实、重要关系、目标、转折与"
+            "未了之事，去重并压缩，不要流水账。只输出这段文字本身，不要任何前后缀。"
+        ))
+        human = HumanMessage(content=(
+            f"角色：{char_name}\n【已有长期记忆】\n{self_summary or '（暂无）'}\n\n"
+            f"【较旧的零散记忆】\n{bullets}\n\n请输出整合后的长期记忆。"
+        ))
+        try:
+            resp = await self.llm.ainvoke([sys, human])
+            return (getattr(resp, "content", "") or "").strip()
+        except Exception:
+            return self_summary or ""
+
+    async def write_outline(self, world_context, directive=""):
+        """编剧：根据世界观/任务，写一份多幕剧本大纲（节拍），指导长线推演。"""
+        wv = world_context.get("worldview") or {}
+        chars = "、".join(c["name"] for c in (world_context.get("characters") or [])) or "（待定）"
+        sys = SystemMessage(content=(
+            "你是编剧。根据世界观、任务与角色，写一份 5~8 个节拍(beat)的剧本大纲，"
+            "构成一条有起承转合、能收束到结局的主线。每个节拍给标题和该节拍要达成的剧情目标。"
+            "只输出 JSON 数组：[{\"title\":\"节拍名\",\"goal\":\"该节拍要发生/达成什么\"}]"
+        ))
+        human = HumanMessage(content=(
+            f"【世界观】{wv.get('description') or ''}\n【规则】{wv.get('rules') or ''}\n"
+            f"【完整背景(仅你可见)】{wv.get('background') or ''}\n【角色】{chars}\n"
+            f"【额外要求】{directive.strip() or '（无）'}\n请输出大纲 JSON 数组。"
+        ))
+        try:
+            data = _parse_json_array(getattr(await self.llm.ainvoke([sys, human]), "content", "") or "")
+        except Exception:
+            data = []
+        beats = []
+        for b in data:
+            if isinstance(b, dict) and b.get("title"):
+                beats.append({"title": b["title"], "goal": b.get("goal", "")})
+        return beats
+
     async def judge_round(self, world_context, scene_setting, round_dialogue, characters_state):
         """世界裁判：看完这一轮对话，输出每个在场角色的状态变化 + 本幕/本天是否结束。
 
@@ -197,20 +261,23 @@ class KeeperAgent:
             f"- {c['name']}：位置={c.get('location') or '未知'}，状态={c.get('stats') or {}}"
             for c in characters_state) or "-（无）"
         convo = "\n".join(f"{d['speaker']}：{d['content']}" for d in round_dialogue) or "（无对话）"
+        beat = world_context.get("beat") if isinstance(world_context, dict) else None
+        beat_block = (f"【当前剧本节拍】{beat.get('title','')}：{beat.get('goal','')}\n" if beat else "")
         sys = SystemMessage(content=(
             "你是持久世界的「世界裁判」。根据这一轮刚发生的对话，结算每个在场角色的状态变化，"
             "要符合剧情因果、变化适度。可改：记忆、所在地点、获得/失去物品、数值(如 hp/mp/stamina 的增减)、"
-            "彼此关系、主观认知。并判断这一幕是否该结束、今天是否该结束。\n"
+            "彼此关系、主观认知。并判断这一幕是否该结束、今天是否该结束、当前剧本节拍是否已达成。\n"
             "只输出 JSON：\n"
             '{"state_changes":[{"character":"名","memory":"新记住的(可选)","location":"新地点名(可选)",'
             '"stat_deltas":{"hp":-10,"mp":-5}(可选,增减量),"items_gained":["物品"],"items_lost":["物品"],'
             '"belief":"新认知(可选)"}],'
             '"relationship_changes":[{"from":"名","to":"名","relation_type":"...","affinity":-100..100,"reason":"..."}],'
-            '"scene":{"should_end":false,"should_end_day":false,"reason":"..."}}\n'
+            '"scene":{"should_end":false,"should_end_day":false,"beat_done":false,"reason":"..."}}\n'
             "任何数组/字段都可省略或为空。stat_deltas 是增减量(负数表示减少)。"
+            "beat_done 表示当前剧本节拍的目标是否已在剧情中达成。"
         ))
         human = HumanMessage(content=(
-            f"【场景情境】{scene_setting or ''}\n【在场角色当前状态】\n{cs_lines}\n\n"
+            f"{beat_block}【场景情境】{scene_setting or ''}\n【在场角色当前状态】\n{cs_lines}\n\n"
             f"【这一轮对话】\n{convo}\n\n请结算状态变化，输出 JSON。"
         ))
         try:

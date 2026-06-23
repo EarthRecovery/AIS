@@ -8,7 +8,7 @@
 from typing import Optional
 
 from fastapi import Depends
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.clients.llm_client import LLMClient
@@ -47,24 +47,34 @@ class SimulationService:
             select(Scene).where(Scene.world_id == world_id, Scene.status == "active")
             .order_by(Scene.id.desc()).limit(1))).scalar_one_or_none()
 
-    async def status(self, world_id):
-        """演播室视图：按场景列出对话(含进行中) + 角色状态。"""
+    async def status(self, world_id, recent_scenes=4):
+        """演播室视图：只详载最近 recent_scenes 个场景的对话（长线推演防卡顿），
+        更早的场景只给标题/状态（折叠，前端按需再拉对话）。"""
         world = await self._get(World, world_id)
         if world is None:
             return {"error": "世界不存在"}
         scenes = (await self.db.execute(
             select(Scene).where(Scene.world_id == world_id).order_by(Scene.id))).scalars().all()
+        n = len(scenes)
         scene_blocks = []
-        for s in scenes:
-            msgs = await self.cs.get_messages(s.id)
+        for i, s in enumerate(scenes):
             parts = await self.cs.get_participants(s.id)
-            scene_blocks.append({
+            block = {
                 "id": s.id, "name": s.name, "scenario": s.scenario, "status": s.status,
-                "day_label": s.day_label,
-                "participants": [p.role_name for p in parts],
-                "messages": [{"speaker_type": m.speaker_type, "speaker_name": m.speaker_name,
-                              "content": m.content} for m in msgs],
-            })
+                "day_label": s.day_label, "participants": [p.role_name for p in parts],
+            }
+            if i >= n - recent_scenes:  # 最近若干幕：带完整对话
+                msgs = await self.cs.get_messages(s.id)
+                block["messages"] = [{"speaker_type": m.speaker_type, "speaker_name": m.speaker_name,
+                                      "content": m.content} for m in msgs]
+                block["collapsed"] = False
+            else:  # 更早的幕：折叠，只给条数
+                cnt = (await self.db.execute(select(func.count()).select_from(SceneMessage)
+                       .where(SceneMessage.scene_id == s.id))).scalar()
+                block["messages"] = []
+                block["message_count"] = int(cnt or 0)
+                block["collapsed"] = True
+            scene_blocks.append(block)
         chars = await self.ws._all(Character, world_id=world_id)
         char_state = []
         for c in chars:
@@ -76,8 +86,16 @@ class SimulationService:
             "world": {"id": world.id, "name": world.name, "in_world_time": world.in_world_time},
             "active_scene_id": active.id if active else None,
             "scenes": scene_blocks, "characters": char_state,
+            "outline": world.outline or [], "beat_index": world.beat_index,
+            "beat": self.ws._current_beat(world),
             "can_rollback": await self.ws.has_snapshot(world_id),
         }
+
+    async def scene_messages(self, scene_id):
+        """按需拉取某个折叠场景的完整对话。"""
+        msgs = await self.cs.get_messages(scene_id)
+        return {"messages": [{"speaker_type": m.speaker_type, "speaker_name": m.speaker_name,
+                              "content": m.content} for m in msgs]}
 
     # ---------------- 开场景 ----------------
     async def _day_has_scene(self, world_id, day_label):
@@ -144,22 +162,68 @@ class SimulationService:
                 "participants": plan.get("participants", [])}
 
     # ---------------- 跑一轮对话 + 世界裁判 ----------------
-    async def _generate_line(self, world_id, scene, speaker_part, roster, transcript):
+    async def _speaker_inputs(self, world_id, scene, part):
+        """组装某个发言者的 prompt 输入：人格 + 世界观文本 + 感知(含短期/长期记忆)。"""
         wv = await self.cs.get_worldview(scene.worldview_id)
         worldview_text = self.cs._worldview_text(wv)
         persona = None
-        if speaker_part.role_id:
-            setting = await self.roles.get_role_setting_by_id(speaker_part.role_id)
+        if part.role_id:
+            setting = await self.roles.get_role_setting_by_id(part.role_id)
             persona = setting.to_json() if setting else None
-        persona = persona or {"name": speaker_part.role_name}
+        persona = persona or {"name": part.role_name}
         perception = None
-        if speaker_part.character_id:
-            perception = await self.ws.build_perception(world_id, speaker_part.character_id, scene.id)
+        if part.character_id:
+            perception = await self.ws.build_perception(world_id, part.character_id, scene.id)
+        return persona, worldview_text, perception
+
+    async def _generate_line(self, world_id, scene, part, roster, transcript):
+        persona, worldview_text, perception = await self._speaker_inputs(world_id, scene, part)
         text = ""
         async for chunk in self.llm.group_chat_stream_perceived(
-            persona, worldview_text, scene.scenario, roster, transcript, perception):
+                persona, worldview_text, scene.scenario, roster, transcript, perception):
             text += chunk
         return text.strip()
+
+    async def _run_judge(self, world_id, scene, round_dialogue):
+        """世界裁判结算这一轮，返回 (applied, end_scene, end_day)。"""
+        chars = await self.ws._all(Character, world_id=world_id)
+        by_name = {c.name: c for c in chars}
+        ctx, _, _, _ = await self.ws._director_context(world_id)
+        parts = await self.cs.get_participants(scene.id)
+        char_state = []
+        for p in parts:
+            c = by_name.get(p.role_name)
+            loc = await self._get(Location, c.current_location_id) if c and c.current_location_id else None
+            char_state.append({"name": p.role_name, "location": loc.name if loc else None,
+                               "stats": (c.stats if c else {}) or {}})
+        verdict = await self.llm.keeper_judge_round(ctx, scene.scenario, round_dialogue, char_state)
+        applied = await self._apply_verdict(world_id, scene, verdict, by_name)
+        sc = verdict.get("scene", {}) or {}
+        end_scene = bool(sc.get("should_end"))
+        end_day = bool(sc.get("should_end_day"))
+        # 剧本节拍达成 → 推进到下一个节拍
+        if sc.get("beat_done"):
+            await self.ws.advance_beat(world_id)
+        if end_scene or end_day:
+            scene.status = "ended"
+            await self.db.commit()
+            # 幕结束 → 给在场角色做记忆沉淀（保留最近 2 幕不沉淀）
+            await self._consolidate_participants(world_id, scene)
+        if end_day:
+            await self._advance_time(world_id)
+        return applied, end_scene, end_day
+
+    async def _consolidate_participants(self, world_id, scene):
+        recent_ids = [s.id for s in (await self.db.execute(
+            select(Scene).where(Scene.world_id == world_id)
+            .order_by(Scene.id.desc()).limit(2))).scalars().all()]
+        parts = await self.cs.get_participants(scene.id)
+        for p in parts:
+            if p.character_id:
+                try:
+                    await self.ws.consolidate_character(p.character_id, recent_ids)
+                except Exception as e:
+                    print(f"consolidate failed for {p.character_id}: {e}")
 
     async def step_round(self, world_id, directive: str = ""):
         """跑一轮：每个在场角色各说一次 → 世界裁判结算状态 → 导演判断幕/天是否结束。"""
@@ -182,31 +246,55 @@ class SimulationService:
             await self.cs.add_message(scene.id, "persona", p.role_name, line, speaker_role_id=p.role_id)
             round_dialogue.append({"speaker": p.role_name, "content": line})
 
-        # 世界裁判
-        chars = await self.ws._all(Character, world_id=world_id)
-        by_name = {c.name: c for c in chars}
-        ctx, _, _, _ = await self.ws._director_context(world_id)
-        char_state = []
-        for p in parts:
-            c = by_name.get(p.role_name)
-            loc = await self._get(Location, c.current_location_id) if c and c.current_location_id else None
-            char_state.append({"name": p.role_name, "location": loc.name if loc else None,
-                               "stats": (c.stats if c else {}) or {}})
-        verdict = await self.llm.keeper_judge_round(ctx, scene.scenario, round_dialogue, char_state)
-        applied = await self._apply_verdict(world_id, scene, verdict, by_name)
-
-        sc = verdict.get("scene", {}) or {}
-        end_scene = bool(sc.get("should_end"))
-        end_day = bool(sc.get("should_end_day"))
-        if end_scene or end_day:
-            scene.status = "ended"
-            await self.db.commit()
-        if end_day:
-            await self._advance_time(world_id)
-
+        applied, end_scene, end_day = await self._run_judge(world_id, scene, round_dialogue)
         return {"scene_id": scene.id, "round": round_dialogue, "applied": applied,
                 "scene_ended": end_scene or end_day, "day_ended": end_day,
                 "active_scene_id": (await self._active_scene(world_id) or scene).id if not (end_scene or end_day) else None}
+
+    async def step_round_stream(self, world_id, directive: str = ""):
+        """流式版：逐 token 吐出每个角色的发言，最后吐裁判结算。yields 事件 dict。"""
+        scene = await self._active_scene(world_id)
+        newly_opened = False
+        if scene is None:
+            opened = await self.open_scene(world_id, directive)
+            if opened.get("error"):
+                yield {"type": "error", "message": opened["error"]}
+                return
+            scene = await self._active_scene(world_id)
+            newly_opened = True
+        if scene is None:
+            yield {"type": "error", "message": "无法开启场景"}
+            return
+        if newly_opened:
+            p0 = await self.cs.get_participants(scene.id)
+            yield {"type": "scene", "scene_id": scene.id, "name": scene.name,
+                   "scenario": scene.scenario, "day_label": scene.day_label,
+                   "participants": [p.role_name for p in p0]}
+
+        parts = await self.cs.get_participants(scene.id)
+        roster = await self.cs._build_roster(parts)
+        round_dialogue = []
+        for p in parts:
+            msgs = await self.cs.get_messages(scene.id)
+            transcript = self.cs._build_transcript(msgs)
+            persona, worldview_text, perception = await self._speaker_inputs(world_id, scene, p)
+            yield {"type": "speaker", "name": p.role_name, "role_id": p.role_id}
+            text = ""
+            async for chunk in self.llm.group_chat_stream_perceived(
+                    persona, worldview_text, scene.scenario, roster, transcript, perception):
+                text += chunk
+                yield {"type": "token", "text": chunk}
+            text = text.strip()
+            if text:
+                await self.cs.add_message(scene.id, "persona", p.role_name, text, speaker_role_id=p.role_id)
+                round_dialogue.append({"speaker": p.role_name, "content": text})
+            yield {"type": "speaker_done", "name": p.role_name}
+
+        yield {"type": "judging"}
+        applied, end_scene, end_day = await self._run_judge(world_id, scene, round_dialogue)
+        yield {"type": "judge", "applied": applied,
+               "scene_ended": end_scene or end_day, "day_ended": end_day}
+        yield {"type": "done"}
 
     async def _apply_verdict(self, world_id, scene, verdict, by_name):
         applied = {"memory": 0, "moves": 0, "stat_changes": 0, "items": 0, "relationships": 0, "beliefs": 0}
