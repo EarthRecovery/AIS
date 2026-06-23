@@ -122,6 +122,9 @@
               <n-button :loading="store.busy" :disabled="store.busy" @click="step">
                 <template #icon><n-icon><PlayOutline /></n-icon></template>下一轮
               </n-button>
+              <n-button :loading="store.busy" :disabled="store.busy" @click="nextScene">
+                <template #icon><n-icon><AddOutline /></n-icon></template>新建场景
+              </n-button>
               <n-button :loading="store.busy" :disabled="store.busy" @click="runScene">
                 <template #icon><n-icon><PlayForwardOutline /></n-icon></template>完成本场景
               </n-button>
@@ -211,7 +214,7 @@ import {
 } from 'naive-ui'
 import {
   PlanetOutline, PlayOutline, PlayForwardOutline, FlashOutline,
-  ArrowUndoOutline, BookOutline,
+  ArrowUndoOutline, BookOutline, AddOutline,
 } from '@vicons/ionicons5'
 import { useStudioStore } from '@/store/Studio'
 import AppNav from '@/components/AppNav.vue'
@@ -316,6 +319,14 @@ const step = async () => {
     try { await store.stepStream(dir) } finally { clearInterval(timer) }
     scrollBottom()
   } catch (e) { message.error('推演失败，请重试') }
+}
+const nextScene = async () => {
+  try {
+    const r = await store.openScene(directive.value); directive.value = ''
+    if (r?.data?.error) message.error(r.data.error)
+    else if (r?.data?.name) message.success(`已开新场景：${r.data.name}`)
+    scrollBottom()
+  } catch (e) { message.error(e?.code === 'ECONNABORTED' ? '开场景超时，请重试' : '开场景失败') }
 }
 const runScene = async () => {
   try {
