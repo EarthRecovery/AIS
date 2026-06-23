@@ -2,7 +2,7 @@
   <div class="shell">
     <AppNav />
     <div class="body">
-      <!-- 左侧：房间 / 世界观 -->
+      <!-- 左侧：场景 / 世界观 -->
       <div class="sidebar">
         <div class="section">
           <div class="section__header">
@@ -19,7 +19,7 @@
 
         <div class="section section--rooms">
           <div class="section__header">
-            <span class="section__title"><n-icon><PeopleOutline /></n-icon> 房间</span>
+            <span class="section__title"><n-icon><PeopleOutline /></n-icon> 场景</span>
             <n-button size="tiny" type="primary" @click="showRoom = true">
               <template #icon><n-icon><AddOutline /></n-icon></template>新建
             </n-button>
@@ -40,7 +40,7 @@
             </div>
             <div v-if="!store.rooms.length" class="empty-mini">
               <n-icon size="22"><ChatbubblesOutline /></n-icon>
-              <span>还没有房间，点上方「新建」</span>
+              <span>还没有场景，点上方「新建」</span>
             </div>
           </n-scrollbar>
         </div>
@@ -100,7 +100,7 @@
         </template>
         <div v-else class="placeholder">
           <n-icon size="46" class="placeholder__icon"><PeopleOutline /></n-icon>
-          <div class="placeholder__title">从左侧选择或新建一个房间</div>
+          <div class="placeholder__title">从左侧选择或新建一个场景</div>
           <div class="placeholder__sub">让多个角色在共享世界观下对话</div>
         </div>
       </div>

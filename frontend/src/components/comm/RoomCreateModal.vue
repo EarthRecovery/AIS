@@ -2,12 +2,12 @@
   <n-modal
     :show="show"
     preset="card"
-    title="新建房间"
+    title="新建场景"
     style="max-width: 560px"
     @update:show="(v) => emit('update:show', v)"
   >
     <n-form>
-      <n-form-item label="房间名称">
+      <n-form-item label="场景名称">
         <n-input v-model:value="form.name" placeholder="例如：深夜酒馆的密谋" />
       </n-form-item>
       <n-form-item label="共享世界观">
@@ -39,7 +39,7 @@
       <div class="footer">
         <n-button @click="emit('update:show', false)">取消</n-button>
         <n-button type="primary" :disabled="!canSubmit" :loading="saving" @click="submit">
-          创建房间
+          创建场景
         </n-button>
       </div>
     </template>
