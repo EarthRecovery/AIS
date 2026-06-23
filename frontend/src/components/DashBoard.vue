@@ -15,9 +15,6 @@
         <n-button type="primary" @click="handleStartNewChat" :loading="isStarting" class="upper_button">
           新建对话
         </n-button>
-        <n-button @click="goCommunication" class="upper_button">
-          多人剧场
-        </n-button>
       </div>
     </div>
     <div class="history">
@@ -64,15 +61,12 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { NScrollbar, NButton, NSelect } from 'naive-ui'
 import { useTurnHistoryStore } from '@/store/TurnHistory'
 import { useChatHistoryStore } from '@/store/ChatHistory'
 import SettingsPanel from './SettingsPanel.vue'
 import { getRoleList } from '@/api/role'
 
-const router = useRouter()
-const goCommunication = () => router.push('/communication')
 const turnHistoryStore = useTurnHistoryStore()
 const chatHistoryStore = useChatHistoryStore()
 const histories = computed(() => turnHistoryStore.turn_history)
@@ -159,7 +153,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   width: 100%;
-  height: 100vh;
+  height: 100%;
 }
 .upper {
   flex: 0 0 auto;

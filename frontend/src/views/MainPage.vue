@@ -1,26 +1,36 @@
 <template>
-  <div class="page">
-    <div class="panel panel--left">
-      <dashboard />
-    </div>
-    <div class="panel panel--right">
-      <chat />
+  <div class="shell">
+    <AppNav />
+    <div class="page">
+      <div class="panel panel--left">
+        <dashboard />
+      </div>
+      <div class="panel panel--right">
+        <chat />
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
+import AppNav from '@/components/AppNav.vue'
 import Dashboard from '@/components/DashBoard.vue'
 import Chat from '@/components/Chat.vue'
 
 </script>
 
 <style scoped>
-.page {
+.shell {
   display: flex;
-  width: 100%;
+  flex-direction: column;
   height: 100vh;
   font-family: 'Poppins', sans-serif;
+}
+.page {
+  display: flex;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
 }
 
 .panel {
