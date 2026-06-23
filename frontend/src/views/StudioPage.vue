@@ -119,22 +119,22 @@
             <n-input v-model:value="directive" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }"
               placeholder="（可选）导演指示：想让剧情往哪走、引入什么……" />
             <div class="btns">
-              <n-button :loading="store.busy" :disabled="store.busy" @click="step">
+              <n-button type="primary" :loading="store.busy" :disabled="store.busy" @click="step">
                 <template #icon><n-icon><PlayOutline /></n-icon></template>下一轮
               </n-button>
-              <n-button :loading="store.busy" :disabled="store.busy" @click="nextScene">
+              <n-button type="info" :loading="store.busy" :disabled="store.busy" @click="nextScene">
                 <template #icon><n-icon><AddOutline /></n-icon></template>新建场景
               </n-button>
-              <n-button :loading="store.busy" :disabled="store.busy" @click="runScene">
+              <n-button type="success" :loading="store.busy" :disabled="store.busy" @click="runScene">
                 <template #icon><n-icon><PlayForwardOutline /></n-icon></template>完成本场景
               </n-button>
-              <n-button :loading="store.busy" :disabled="store.busy" @click="runChapter">
+              <n-button type="warning" :loading="store.busy" :disabled="store.busy" @click="runChapter">
                 <template #icon><n-icon><FlashOutline /></n-icon></template>完成本章
               </n-button>
-              <n-button type="primary" :loading="store.busy" :disabled="store.busy" @click="newChapter">
+              <n-button type="info" ghost :loading="store.busy" :disabled="store.busy" @click="newChapter">
                 <template #icon><n-icon><BookOutline /></n-icon></template>新建章节
               </n-button>
-              <n-button :disabled="!store.canRollback || store.busy" @click="rollback">
+              <n-button type="error" ghost :disabled="!store.canRollback || store.busy" @click="rollback">
                 <template #icon><n-icon><ArrowUndoOutline /></n-icon></template>回退
               </n-button>
             </div>
