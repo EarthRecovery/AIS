@@ -124,6 +124,11 @@ onMounted(() => {
   height: 100%;
 }
 
+/* 右侧聊天区不显示滚动条（仍可用滚轮滚动）；左侧历史记录滚动条保留 */
+.chatbox__scroll :deep(.n-scrollbar-rail) {
+  display: none;
+}
+
 .chatbox__empty {
   display: flex;
   height: 100%;

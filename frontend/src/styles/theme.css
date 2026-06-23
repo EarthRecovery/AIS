@@ -24,6 +24,9 @@ html, body, #app {
   margin: 0;
   height: 100%;
   background: var(--c-bg);
+  /* 锁掉窗口级原生滚动条（最右侧那条）。各页面都是 100vh 整屏布局，
+     需要滚动的区域（如左侧历史记录、聊天消息）用各自的内部滚动容器。 */
+  overflow: hidden;
 }
 
 /* 统一滚动条观感 */
