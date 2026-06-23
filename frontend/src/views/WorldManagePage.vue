@@ -194,7 +194,10 @@ onMounted(() => {
 .stat__num { font-size: 18px; font-weight: 700; color: var(--c-text); }
 .stat__label { font-size: 12px; color: var(--c-text-soft); }
 
-.tabs { flex: 1; min-height: 0; padding: 6px 28px 24px; overflow: auto; }
+/* n-tabs 自身做成纵向 flex：导航固定，分页内容区单独滚动 */
+.tabs { flex: 1; min-height: 0; padding: 6px 28px 0; display: flex; flex-direction: column; overflow: hidden; }
+.tabs :deep(.n-tabs-pane-wrapper) { flex: 1; min-height: 0; overflow-y: auto; }
+.tabs :deep(.n-tab-pane) { padding-bottom: 28px; }
 .tab-label { display: inline-flex; align-items: center; gap: 6px; }
 
 .placeholder { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
