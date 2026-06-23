@@ -2,7 +2,8 @@
   <div class="nav">
     <div class="nav__brand">
       <n-icon size="20" class="nav__logo"><SparklesOutline /></n-icon>
-      <span class="nav__title">AIS 多智能体世界</span>
+      <span class="nav__title">Aistoria</span>
+      <span class="nav__subtitle">艾史界</span>
     </div>
 
     <div class="nav__tabs">
@@ -79,7 +80,8 @@ const logout = () => {
 }
 .nav__brand { display: flex; align-items: center; gap: 8px; }
 .nav__logo { color: #a5b4fc; }
-.nav__title { font-weight: 700; font-size: 15px; letter-spacing: 0.3px; white-space: nowrap; }
+.nav__title { font-weight: 700; font-size: 16px; letter-spacing: 0.4px; white-space: nowrap; }
+.nav__subtitle { font-size: 12px; color: #9aa4b8; white-space: nowrap; }
 
 .nav__tabs { display: flex; align-items: center; gap: 10px; flex: 1; }
 
