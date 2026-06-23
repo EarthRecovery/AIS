@@ -135,13 +135,37 @@ const barStyle = (k, v) => ({
 const scrollBottom = () => nextTick(() => stageRef.value?.scrollTo({ position: 'bottom' }))
 watch(() => store.scenes.map((s) => s.messages.length).join(','), scrollBottom)
 
-const step = async () => { await store.step(directive.value); directive.value = ''; scrollBottom() }
-const nextScene = async () => { await store.openScene(directive.value); directive.value = '' }
+const step = async () => {
+  try {
+    const r = await store.step(directive.value)
+    if (r?.data?.error) message.error(r.data.error)
+    directive.value = ''
+    scrollBottom()
+  } catch (e) {
+    console.error('step failed', e)
+    message.error(e?.code === 'ECONNABORTED' ? '本轮推演超时，请重试' : '推演失败，请重试')
+  }
+}
+const nextScene = async () => {
+  try {
+    const r = await store.openScene(directive.value)
+    if (r?.data?.error) message.error(r.data.error)
+    directive.value = ''
+  } catch (e) {
+    console.error('open scene failed', e)
+    message.error(e?.code === 'ECONNABORTED' ? '开场景超时，请重试' : '开场景失败，请重试')
+  }
+}
 const runDay = async () => {
-  const r = await store.runDay(directive.value)
-  directive.value = ''
-  if (r?.data?.success) message.success(`这一天推完：${r.data.scenes} 幕 / ${r.data.rounds} 轮`)
-  scrollBottom()
+  try {
+    const r = await store.runDay(directive.value)
+    directive.value = ''
+    if (r?.data?.success) message.success(`这一天推完：${r.data.scenes} 幕 / ${r.data.rounds} 轮`)
+    scrollBottom()
+  } catch (e) {
+    console.error('run day failed', e)
+    message.error(e?.code === 'ECONNABORTED' ? '自动推演超时（这一天内容较多），请重试或改用「下一轮」' : '自动推演失败，请重试')
+  }
 }
 const rollback = async () => {
   const r = await store.rollback()
