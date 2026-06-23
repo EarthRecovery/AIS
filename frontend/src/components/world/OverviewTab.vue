@@ -12,11 +12,45 @@
           <n-select v-model:value="wf.status" :options="statusOptions" />
         </n-form-item>
         <n-form-item label="当前世界观">
-          <n-select v-model:value="wf.worldview_id" :options="worldviewOptions" clearable />
+          <div class="wv-row">
+            <n-select v-model:value="wf.worldview_id" :options="worldviewOptions" clearable
+              placeholder="选择一个世界观，或点右侧新建" />
+            <n-button @click="showCreate = true">＋ 新建世界观</n-button>
+          </div>
         </n-form-item>
         <n-button type="primary" @click="saveWorld">保存世界参数</n-button>
       </n-form>
     </n-card>
+
+    <!-- 新建世界观（建好自动绑定为当前世界观） -->
+    <n-modal v-model:show="showCreate" preset="card" title="新建世界观" style="max-width: 560px">
+      <n-form label-placement="top">
+        <n-form-item label="名称" required>
+          <n-input v-model:value="cf.name" placeholder="例如：雾都侦探社 / 提瓦特大陆" />
+        </n-form-item>
+        <n-form-item label="公共设定（所有角色可知）">
+          <n-input v-model:value="cf.description" type="textarea" :autosize="{ minRows: 2, maxRows: 8 }"
+            placeholder="时代、地点、阵营、基调……会注入对话" />
+        </n-form-item>
+        <n-form-item label="世界规则（公共，可选）">
+          <n-input v-model:value="cf.rules" type="textarea" :autosize="{ minRows: 1, maxRows: 6 }"
+            placeholder="魔法体系、禁忌、物理法则等" />
+        </n-form-item>
+        <n-form-item>
+          <template #label><span class="bg-label">完整背景设定 🔒 仅你可见</span></template>
+          <n-input v-model:value="cf.background" type="textarea" :autosize="{ minRows: 3, maxRows: 12 }"
+            placeholder="完整背景圣经：来龙去脉、隐藏真相……仅供整理思路，不发给角色。" />
+        </n-form-item>
+      </n-form>
+      <template #footer>
+        <div class="modal-footer">
+          <n-button @click="showCreate = false">取消</n-button>
+          <n-button type="primary" :disabled="!cf.name.trim()" :loading="creating" @click="submitCreate">
+            创建并设为当前世界观
+          </n-button>
+        </div>
+      </template>
+    </n-modal>
 
     <n-card v-if="store.worldview" title="当前世界观（可更改）" size="small" class="card">
       <n-form label-placement="left" label-width="100">
@@ -55,8 +89,8 @@
 </template>
 
 <script setup>
-import { reactive, computed, watch } from 'vue'
-import { NCard, NForm, NFormItem, NInput, NSelect, NButton } from 'naive-ui'
+import { reactive, ref, computed, watch } from 'vue'
+import { NCard, NForm, NFormItem, NInput, NSelect, NButton, NModal } from 'naive-ui'
 import { useWorldStore } from '@/store/World'
 import { updateWorld, updateWorldview } from '@/api/world'
 
@@ -85,6 +119,29 @@ watch(
 const saveWorld = () => store.run(() => updateWorld(store.worldId, { ...wf }))
 const saveWorldview = () =>
   store.run(() => updateWorldview(store.worldview.id, { ...vf, world_id: store.worldId }))
+
+// 新建世界观 → 自动绑定为当前世界并刷新（下方编辑卡片随即出现）
+const showCreate = ref(false)
+const creating = ref(false)
+const cf = reactive({ name: '', description: '', rules: '', background: '' })
+
+const submitCreate = async () => {
+  if (!cf.name.trim() || creating.value) return
+  creating.value = true
+  try {
+    const id = await store.addWorldview({ ...cf })
+    if (id) {
+      wf.worldview_id = id
+      await store.run(() => updateWorld(store.worldId, { worldview_id: id }))
+    }
+    cf.name = ''; cf.description = ''; cf.rules = ''; cf.background = ''
+    showCreate.value = false
+  } catch (e) {
+    console.error('create worldview failed', e)
+  } finally {
+    creating.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -96,4 +153,7 @@ const saveWorldview = () =>
 .layer-hint--public { color: #0891b2; }
 .layer-hint--private { color: #7c3aed; }
 .bg-label { color: #7c3aed; font-weight: 600; }
+.wv-row { display: flex; gap: 10px; width: 100%; align-items: center; }
+.wv-row :deep(.n-select) { flex: 1; }
+.modal-footer { display: flex; justify-content: flex-end; gap: 12px; }
 </style>

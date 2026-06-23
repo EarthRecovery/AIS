@@ -30,6 +30,11 @@ export const useWorldStore = defineStore('world', {
     async fetchWorldviews() {
       this.worldviews = (await api.listWorldviews()).data?.worldviews || []
     },
+    async addWorldview(payload) {
+      const res = await api.createWorldview(payload)
+      await this.fetchWorldviews()
+      return res.data?.id
+    },
     async createWorld(payload) {
       const res = await api.createWorld(payload)
       await this.fetchWorlds()

@@ -11,6 +11,8 @@ export const getWorldEvents = (id) => request.get(`/world/${id}/events`)
 // ---- Worldview ----
 export const listWorldviews = () => request.get('/world/worldview/list')
 export const updateWorldview = (id, payload) => request.patch(`/world/worldview/${id}`, payload)
+// 世界观按用户共享，复用 communication 的创建接口
+export const createWorldview = (payload) => request.post('/communication/worldview', payload)
 
 // ---- Character ----
 export const createCharacter = (worldId, payload) => request.post(`/world/${worldId}/character`, payload)
