@@ -7,7 +7,7 @@ WorldEvent(含 before/after)，落实「可变当前态 + 追加事件日志」�
 from typing import List, Optional
 
 from fastapi import Depends
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.clients.llm_client import LLMClient
@@ -27,6 +27,7 @@ from storage.models.scene_message import SceneMessage
 from storage.models.scene_participant import SceneParticipant
 from storage.models.world import World
 from storage.models.world_event import WorldEvent
+from storage.models.world_snapshot import WorldSnapshot
 from storage.models.worldview import Worldview
 
 
@@ -469,3 +470,283 @@ class WorldService:
             "world": world, "worldview": worldview, "characters": char_blocks,
             "locations": locations, "items": items, "relationships": relationships,
         }
+
+    # ============ 每日结算：世界推演引擎 ============
+    async def _director_context(self, world_id):
+        """给世界导演的输入：世界观(含背景) + 常识 + 角色摘要 + 关系 + 近期事件 + 时间。"""
+        world = await self._get(World, world_id)
+        wv = await self._get(Worldview, world.worldview_id) if world and world.worldview_id else None
+        chars = await self._all(Character, world_id=world_id)
+        char_ctx = []
+        for c in chars:
+            ms = await self.get_mental(c.id)
+            mems = (await self.db.execute(
+                select(AgentMemory).where(AgentMemory.character_id == c.id)
+                .order_by(AgentMemory.id.desc()).limit(4))).scalars().all()
+            bits = []
+            if ms and ms.self_summary:
+                bits.append(ms.self_summary)
+            if ms and ms.mood:
+                bits.append(f"心情:{ms.mood}")
+            if ms and ms.goals:
+                bits.append(f"目标:{ms.goals}")
+            bits += [m.content for m in mems]
+            char_ctx.append({"name": c.name, "summary": "；".join(b for b in bits if b)})
+        rels = []
+        for r in await self._all(Relationship, world_id=world_id):
+            fn = next((c.name for c in chars if c.id == r.from_character_id), f"#{r.from_character_id}")
+            tn = next((c.name for c in chars if c.id == r.to_character_id), f"#{r.to_character_id}")
+            rels.append({"from": fn, "to": tn, "relation_type": r.relation_type, "affinity": r.affinity})
+        commons = [c.content for c in await self.list_common_knowledge(world_id)]
+        recent = [f"{e.in_world_time or ''} {e.summary}" for e in (await self.get_events(world_id, limit=12))]
+        return {
+            "worldview": ({"description": wv.description, "rules": wv.rules,
+                           "background": wv.background} if wv else {}),
+            "characters": char_ctx, "relationships": rels,
+            "common_knowledge": commons, "recent_events": recent,
+            "in_world_time": world.in_world_time if world else "",
+        }, world, wv, chars
+
+    @staticmethod
+    def _row(obj, fields):
+        return {f: getattr(obj, f) for f in fields}
+
+    # 各表参与快照的字段（不含时间戳，回退时让其重置）
+    _SNAP_FIELDS = {
+        "character": ["id", "world_id", "role_id", "name", "status", "current_location_id"],
+        "mental_state": ["id", "character_id", "mood", "goals", "motivation", "self_summary"],
+        "agent_memory": ["id", "world_id", "character_id", "kind", "content", "subject_type",
+                         "subject_id", "confidence", "is_true", "source_scene_id", "importance"],
+        "relationship": ["id", "world_id", "from_character_id", "to_character_id",
+                         "relation_type", "affinity", "notes"],
+        "item": ["id", "world_id", "name", "description", "owner_character_id", "location_id", "state"],
+        "location": ["id", "world_id", "name", "type", "description", "parent_location_id"],
+        "ability": ["id", "character_id", "name", "description", "level"],
+        "common_knowledge": ["id", "world_id", "content"],
+        "scene": ["id", "user_id", "world_id", "worldview_id", "name", "scenario", "summary",
+                  "status", "prev_scene_id"],
+    }
+
+    async def _snapshot_world(self, world_id):
+        """结算前给世界拍一张全量快照，存入 ais_world_snapshots。"""
+        world = await self._get(World, world_id)
+        wv = await self._get(Worldview, world.worldview_id) if world and world.worldview_id else None
+        chars = await self._all(Character, world_id=world_id)
+        char_ids = [c.id for c in chars]
+
+        async def rows(model, key, **flt):
+            objs = (await self.db.execute(
+                select(model).where(*[getattr(model, k) == v for k, v in flt.items()]))).scalars().all()
+            return [self._row(o, self._SNAP_FIELDS[key]) for o in objs]
+
+        mentals, abilities = [], []
+        if char_ids:
+            ms = (await self.db.execute(
+                select(MentalState).where(MentalState.character_id.in_(char_ids)))).scalars().all()
+            mentals = [self._row(o, self._SNAP_FIELDS["mental_state"]) for o in ms]
+            ab = (await self.db.execute(
+                select(Ability).where(Ability.character_id.in_(char_ids)))).scalars().all()
+            abilities = [self._row(o, self._SNAP_FIELDS["ability"]) for o in ab]
+
+        max_event = (await self.db.execute(
+            select(func.max(WorldEvent.id)).where(WorldEvent.world_id == world_id))).scalar() or 0
+
+        state = {
+            "world": {"in_world_time": world.in_world_time, "worldview_id": world.worldview_id,
+                      "status": world.status},
+            "worldview": (self._row(wv, ["id", "description", "rules", "background"]) if wv else None),
+            "characters": [self._row(c, self._SNAP_FIELDS["character"]) for c in chars],
+            "mental_states": mentals,
+            "abilities": abilities,
+            "agent_memories": await rows(AgentMemory, "agent_memory", world_id=world_id),
+            "relationships": await rows(Relationship, "relationship", world_id=world_id),
+            "items": await rows(Item, "item", world_id=world_id),
+            "locations": await rows(Location, "location", world_id=world_id),
+            "common_knowledge": await rows(CommonKnowledge, "common_knowledge", world_id=world_id),
+            "scenes": await rows(Scene, "scene", world_id=world_id),
+            "events_max_id": int(max_event),
+        }
+        snap = WorldSnapshot(world_id=world_id, day_label=world.in_world_time, state=state)
+        return await self._save(snap)
+
+    async def has_snapshot(self, world_id):
+        res = await self.db.execute(
+            select(func.count(WorldSnapshot.id)).where(WorldSnapshot.world_id == world_id))
+        return (res.scalar() or 0) > 0
+
+    async def rollback_day(self, world_id):
+        """回退一天：恢复最近一张快照，并删除该快照之后产生的事件与快照。"""
+        res = await self.db.execute(
+            select(WorldSnapshot).where(WorldSnapshot.world_id == world_id)
+            .order_by(WorldSnapshot.id.desc()).limit(1))
+        snap = res.scalar_one_or_none()
+        if snap is None:
+            return {"success": False, "error": "没有可回退的快照"}
+        st = snap.state or {}
+
+        # 1) 删除该世界的所有子表行（mental/ability 先按当前角色删）
+        chars_now = await self._all(Character, world_id=world_id)
+        cids = [c.id for c in chars_now]
+        if cids:
+            await self.db.execute(delete(MentalState).where(MentalState.character_id.in_(cids)))
+            await self.db.execute(delete(Ability).where(Ability.character_id.in_(cids)))
+        for model in (AgentMemory, Relationship, Item, Location, CommonKnowledge, Scene, Character):
+            await self.db.execute(delete(model).where(model.world_id == world_id))
+
+        # 2) 按快照重建（保留原 id，维持彼此引用）
+        def mk(model, rows):
+            for r in rows or []:
+                self.db.add(model(**r))
+        mk(Character, st.get("characters"))
+        mk(MentalState, st.get("mental_states"))
+        mk(Ability, st.get("abilities"))
+        mk(AgentMemory, st.get("agent_memories"))
+        mk(Relationship, st.get("relationships"))
+        mk(Item, st.get("items"))
+        mk(Location, st.get("locations"))
+        mk(CommonKnowledge, st.get("common_knowledge"))
+        mk(Scene, st.get("scenes"))
+
+        # 3) 恢复世界与世界观标量字段
+        world = await self._get(World, world_id)
+        w = st.get("world") or {}
+        if world:
+            world.in_world_time = w.get("in_world_time", world.in_world_time)
+            world.worldview_id = w.get("worldview_id", world.worldview_id)
+            world.status = w.get("status", world.status)
+        wv_snap = st.get("worldview")
+        if wv_snap:
+            wv = await self._get(Worldview, wv_snap["id"])
+            if wv:
+                wv.description = wv_snap.get("description")
+                wv.rules = wv_snap.get("rules")
+                wv.background = wv_snap.get("background")
+
+        # 4) 删除快照之后产生的事件 + 这张快照
+        await self.db.execute(delete(WorldEvent).where(
+            WorldEvent.world_id == world_id, WorldEvent.id > int(st.get("events_max_id", 0))))
+        await self.db.execute(delete(WorldSnapshot).where(WorldSnapshot.id == snap.id))
+        await self.db.commit()
+        return {"success": True, "restored_to": snap.day_label}
+
+    async def advance_day(self, world_id, directive: str = ""):
+        """每日结算：拍快照 → 世界导演推演一天 → 应用全部变化（全量自主）。"""
+        world = await self._get(World, world_id)
+        if world is None:
+            return {"success": False, "error": "世界不存在"}
+
+        await self._snapshot_world(world_id)
+        ctx, world, wv, chars = await self._director_context(world_id)
+        plan = await self.llm.keeper_direct_day(ctx, directive)
+
+        t_next = plan.get("next_time") or world.in_world_time
+        name_to_char = {c.name: c for c in chars}
+
+        async def ensure_char(name):
+            if name in name_to_char:
+                return name_to_char[name]
+            return None
+
+        applied = {"events": 0, "memories": 0, "relationship_changes": 0,
+                   "new_characters": 0, "common_knowledge": 0, "scene_switched": False,
+                   "background_appended": False}
+
+        # 当日叙事
+        day_summary = (plan.get("day_summary") or "").strip()
+        if day_summary:
+            await self.log_event(world_id, "day_summary", day_summary,
+                                 {"directive": directive}, in_world_time=t_next)
+
+        # 剧情事件
+        for ev in plan.get("events", []):
+            if ev.get("summary"):
+                await self.log_event(world_id, ev.get("kind", "plot"), ev["summary"],
+                                     {}, in_world_time=t_next)
+                applied["events"] += 1
+
+        # 新角色（不建 Role，纯世界角色 + 自我摘要，回退可净删）
+        for nc in plan.get("new_characters", []):
+            nm = (nc.get("name") or "").strip()
+            if not nm or nm in name_to_char:
+                continue
+            ch = await self.create_character(world_id, nm)
+            name_to_char[nm] = ch
+            desc = nc.get("description") or ""
+            traits = "、".join(nc.get("personality", []) or [])
+            await self.upsert_mental(ch.id, {"self_summary": desc, "motivation": traits})
+            await self.log_event(world_id, "character_spawn", f"新角色登场：{nm}",
+                                 {"description": desc}, actor=ch.id, in_world_time=t_next)
+            applied["new_characters"] += 1
+
+        # 记忆
+        for m in plan.get("memories", []):
+            ch = name_to_char.get(m.get("character", ""))
+            if ch is None or not m.get("content"):
+                continue
+            await self.add_memory(world_id, ch.id, m["content"], kind=m.get("kind", "memory"),
+                                  importance=int(m.get("importance", 0) or 0), log=False)
+            applied["memories"] += 1
+
+        # 关系变化（按名找/建，落库并记事件）
+        for rc in plan.get("relationship_changes", []):
+            a = name_to_char.get(rc.get("from", "")); b = name_to_char.get(rc.get("to", ""))
+            if a is None or b is None:
+                continue
+            res = await self.db.execute(select(Relationship).where(
+                Relationship.world_id == world_id,
+                Relationship.from_character_id == a.id, Relationship.to_character_id == b.id))
+            rel = res.scalar_one_or_none()
+            data = {k: rc[k] for k in ("relation_type", "affinity") if rc.get(k) is not None}
+            if rel is None:
+                await self.create_relationship(world_id, {
+                    "from_character_id": a.id, "to_character_id": b.id,
+                    "relation_type": rc.get("relation_type", "stranger"),
+                    "affinity": int(rc.get("affinity", 0) or 0), "notes": rc.get("reason")})
+            else:
+                await self.update_relationship(rel.id, data)
+            applied["relationship_changes"] += 1
+
+        # 世界观补充
+        wa = plan.get("worldview_additions") or {}
+        for ck in wa.get("common_knowledge", []) or []:
+            if ck:
+                await self.add_common_knowledge(world_id, ck)
+                applied["common_knowledge"] += 1
+        append_bg = (wa.get("background_append") or "").strip()
+        if append_bg and wv is not None:
+            wv.background = ((wv.background or "") + "\n\n" + append_bg).strip()
+            await self.db.commit()
+            await self.log_event(world_id, "worldview_change", "世界导演补充了完整背景设定",
+                                 {"append": append_bg[:200]}, in_world_time=t_next)
+            applied["background_appended"] = True
+
+        # 场景切换
+        sc = plan.get("scene") or {}
+        if sc.get("should_switch"):
+            nxt = sc.get("next", {}) or {}
+            prev = (await self.db.execute(select(Scene).where(Scene.world_id == world_id)
+                    .order_by(Scene.id.desc()).limit(1))).scalar_one_or_none()
+            new_scene = Scene(user_id=world.user_id, world_id=world_id, worldview_id=world.worldview_id,
+                              name=nxt.get("name", "新场景"), scenario=nxt.get("setting", ""),
+                              prev_scene_id=(prev.id if prev else None))
+            new_scene = await self._save(new_scene)
+            for order, nm in enumerate(nxt.get("participants", []) or []):
+                ch = name_to_char.get(nm)
+                self.db.add(SceneParticipant(scene_id=new_scene.id,
+                            role_id=(ch.role_id if ch else None),
+                            character_id=(ch.id if ch else None), role_name=nm, display_order=order))
+            await self.db.commit()
+            await self.log_event(world_id, "scene_change",
+                                 f"开启新场景：{new_scene.name}", {"reason": sc.get("reason", "")},
+                                 in_world_time=t_next)
+            applied["scene_switched"] = True
+
+        # 推进世界时间
+        if t_next and t_next != world.in_world_time:
+            before = world.in_world_time
+            world.in_world_time = t_next
+            await self.db.commit()
+            await self.log_event(world_id, "time_advance", f"世界时间推进到「{t_next}」",
+                                 {"before": before, "after": t_next}, in_world_time=t_next)
+
+        return {"success": True, "day_summary": day_summary, "next_time": t_next, "applied": applied}

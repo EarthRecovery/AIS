@@ -14,6 +14,7 @@ export const useWorldStore = defineStore('world', {
     items: [],
     relationships: [],
     events: [],
+    canRollback: false,
     loading: false,
   }),
   getters: {
@@ -69,6 +70,7 @@ export const useWorldStore = defineStore('world', {
         this.items = d.items || []
         this.relationships = d.relationships || []
         await this.refreshEvents()
+        await this.refreshCanRollback()
       } finally {
         this.loading = false
       }
@@ -78,6 +80,23 @@ export const useWorldStore = defineStore('world', {
     },
     async refreshEvents() {
       if (this.worldId) this.events = (await api.getWorldEvents(this.worldId)).data?.events || []
+    },
+    async refreshCanRollback() {
+      if (this.worldId) this.canRollback = (await api.canRollback(this.worldId)).data?.can_rollback || false
+    },
+    async advanceDay(directive) {
+      if (!this.worldId) return null
+      const res = await api.advanceDay(this.worldId, directive || '')
+      await this.refresh()
+      await this.refreshCanRollback()
+      return res.data
+    },
+    async rollbackDay() {
+      if (!this.worldId) return null
+      const res = await api.rollbackDay(this.worldId)
+      await this.refresh()
+      await this.refreshCanRollback()
+      return res.data
     },
 
     // 通用：执行某个 api 调用后刷新世界详情

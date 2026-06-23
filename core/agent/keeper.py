@@ -74,3 +74,66 @@ class KeeperAgent:
         data.setdefault("memories", [])
         data.setdefault("scene", {"should_switch": False})
         return data
+
+    async def direct_day(self, world_context: dict, directive: str = ""):
+        """世界导演：把世界推进「一天」，产出当日结算（全量自主）。
+
+        world_context 提供世界全貌；directive 是用户对这一天的导演指示（可空）。
+        返回结构化结算 JSON，由 world_service 落库（事件/记忆/关系/新角色/世界观补充/场景）。
+        """
+        wv = world_context.get("worldview") or {}
+        chars = world_context.get("characters") or []
+        rels = world_context.get("relationships") or []
+        commons = world_context.get("common_knowledge") or []
+        recent = world_context.get("recent_events") or []
+        cur_time = world_context.get("in_world_time") or "第1天"
+
+        char_lines = "\n".join(
+            f"- {c['name']}：{c.get('summary') or '（无额外信息）'}" for c in chars
+        ) or "- （世界中暂无角色）"
+        rel_lines = "\n".join(
+            f"- {r['from']} → {r['to']}：{r['relation_type']}（好感{r['affinity']}）" for r in rels
+        ) or "- （暂无关系）"
+        common_lines = "\n".join(f"- {c}" for c in commons) or "- （无）"
+        recent_lines = "\n".join(f"- {e}" for e in recent) or "- （无）"
+
+        sys = SystemMessage(content=(
+            "你是一个持久世界的「世界导演」。你的任务是把这个世界向前推进『一天』，"
+            "像写一段连贯、可信、有因果的剧情演进，并据此结算世界状态的变化。\n"
+            "你可以：推进剧情事件、更新角色记忆与认知、改变角色关系、在合理时引入新角色、"
+            "补充世界观常识或在完整背景里追加设定、必要时开启一个新场景。\n"
+            "要尊重已有设定与因果，变化要适度（一天的体量），不要推翻世界。\n"
+            "只输出 JSON，不要任何解释。结构：\n"
+            '{"day_summary":"今天发生了什么（一段叙事）",'
+            '"events":[{"kind":"action|scene|plot","summary":"事件"}],'
+            '"memories":[{"character":"角色名","kind":"memory|fact|observation|belief","content":"该角色记住的","importance":0}],'
+            '"relationship_changes":[{"from":"角色名","to":"角色名","relation_type":"friend|rival|...","affinity":-100..100,"reason":"原因"}],'
+            '"new_characters":[{"name":"新角色名","description":"设定","personality":["性格"]}],'
+            '"worldview_additions":{"common_knowledge":["新常识"],"background_append":"可选，追加到完整背景的文字"},'
+            '"scene":{"should_switch":false,"reason":"原因","next":{"name":"新场景名","setting":"设定","participants":["角色名"]}},'
+            '"next_time":"下一天的时间标签，如 第2天 清晨"}\n'
+            "任何数组都可以为空；should_switch 为 false 时可省略 next；new_characters 仅在剧情确需时才给。"
+        ))
+        human = HumanMessage(content=(
+            f"【世界观·公共设定】\n{wv.get('description') or '（无）'}\n\n"
+            f"【世界观·规则】\n{wv.get('rules') or '（无）'}\n\n"
+            f"【世界观·完整背景（仅你这个导演可见，用于把握走向）】\n{wv.get('background') or '（无）'}\n\n"
+            f"【世界常识】\n{common_lines}\n\n"
+            f"【当前角色】\n{char_lines}\n\n"
+            f"【当前关系】\n{rel_lines}\n\n"
+            f"【近期事件】\n{recent_lines}\n\n"
+            f"【当前世界时间】{cur_time}\n\n"
+            f"【用户对这一天的导演指示】\n{directive.strip() or '（无，按世界自身逻辑自然推进）'}\n\n"
+            "请把世界推进一天，输出结算 JSON。"
+        ))
+        try:
+            resp = await self.llm.ainvoke([sys, human])
+            data = _parse_json(getattr(resp, "content", "") or "")
+        except Exception:
+            data = {}
+        data.setdefault("day_summary", "")
+        for key in ("events", "memories", "relationship_changes", "new_characters"):
+            data.setdefault(key, [])
+        data.setdefault("worldview_additions", {})
+        data.setdefault("scene", {"should_switch": False})
+        return data

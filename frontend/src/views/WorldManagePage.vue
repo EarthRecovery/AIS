@@ -97,6 +97,7 @@ import { NButton, NScrollbar, NTabs, NTabPane, NModal, NForm, NFormItem, NInput,
 import {
   EarthOutline, AddOutline, TrashOutline, TimeOutline, PeopleOutline,
   LocationOutline, CubeOutline, GitNetworkOutline, AlbumsOutline, BookOutline,
+  PlanetOutline,
 } from '@vicons/ionicons5'
 import { useWorldStore } from '@/store/World'
 import AppNav from '@/components/AppNav.vue'
@@ -106,6 +107,7 @@ import LocationsTab from '@/components/world/LocationsTab.vue'
 import ItemsTab from '@/components/world/ItemsTab.vue'
 import RelationshipsTab from '@/components/world/RelationshipsTab.vue'
 import TimelineTab from '@/components/world/TimelineTab.vue'
+import SimulateTab from '@/components/world/SimulateTab.vue'
 
 const store = useWorldStore()
 const showCreate = ref(false)
@@ -116,6 +118,7 @@ const statusLabel = (s) => ({ active: '运行中', paused: '暂停', archived: '
 
 const tabDefs = [
   { name: 'overview', label: '概览 / 世界观', icon: BookOutline, comp: OverviewTab },
+  { name: 'simulate', label: '每日推演', icon: PlanetOutline, comp: SimulateTab },
   { name: 'characters', label: '角色', icon: PeopleOutline, comp: CharactersTab },
   { name: 'locations', label: '地点 / 住所', icon: LocationOutline, comp: LocationsTab },
   { name: 'items', label: '物品', icon: CubeOutline, comp: ItemsTab },

@@ -38,6 +38,10 @@ class LLMClient:
     # ---- Keeper：记忆管控 + 场景切换决策 ----
     async def keeper_digest(self, world_common, scene_setting, participants, transcript):
         return await self.keeper.digest_scene(world_common, scene_setting, participants, transcript)
+
+    # ---- 世界导演：把世界推进一天（每日结算） ----
+    async def keeper_direct_day(self, world_context, directive=""):
+        return await self.keeper.direct_day(world_context, directive)
     
     async def start_new_chat(self):
         self.agent.start_new_turn()

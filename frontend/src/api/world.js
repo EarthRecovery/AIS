@@ -8,6 +8,11 @@ export const updateWorld = (id, payload) => request.patch(`/world/${id}`, payloa
 export const deleteWorld = (id) => request.delete(`/world/${id}`)
 export const getWorldEvents = (id) => request.get(`/world/${id}/events`)
 
+// ---- 每日结算 / 推演 ----
+export const advanceDay = (worldId, directive) => request.post(`/world/${worldId}/advance-day`, { directive })
+export const rollbackDay = (worldId) => request.post(`/world/${worldId}/rollback-day`)
+export const canRollback = (worldId) => request.get(`/world/${worldId}/can-rollback`)
+
 // ---- Worldview ----
 export const listWorldviews = () => request.get('/world/worldview/list')
 export const updateWorldview = (id, payload) => request.patch(`/world/worldview/${id}`, payload)

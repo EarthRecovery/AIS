@@ -15,4 +15,5 @@ from storage.models import (  # noqa: F401
     agent_memory,
     common_knowledge,
     world_event,
+    world_snapshot,
 )

@@ -378,3 +378,22 @@ async def get_perception(world_id: int, char_id: int, scene_id: int | None = Non
 async def keeper_digest(scene_id: int, svc: WorldService = Depends()):
     """记录官消化一个场景：写各在场角色的私有记忆，并决定是否切换场景。"""
     return await svc.keeper_digest_scene(scene_id)
+
+
+# ================= 每日结算 / 世界推演 =================
+class AdvanceDayRequest(BaseModel):
+    directive: str | None = None
+
+@router.post("/{world_id}/advance-day")
+async def advance_day(world_id: int, req: AdvanceDayRequest, svc: WorldService = Depends()):
+    """把世界推进一天：拍快照后由世界导演自动推演并应用全部变化。"""
+    return await svc.advance_day(world_id, (req.directive or ""))
+
+@router.post("/{world_id}/rollback-day")
+async def rollback_day(world_id: int, svc: WorldService = Depends()):
+    """回退一天：恢复最近一张结算前快照。"""
+    return await svc.rollback_day(world_id)
+
+@router.get("/{world_id}/can-rollback")
+async def can_rollback(world_id: int, svc: WorldService = Depends()):
+    return {"can_rollback": await svc.has_snapshot(world_id)}
