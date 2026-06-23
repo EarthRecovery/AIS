@@ -1,6 +1,6 @@
 import request from '@/utils/request'
 
-// 真实推演（演播室）
+// 真实推演（沙盘）
 export const simStatus = (worldId) => request.get(`/world/${worldId}/sim/status`)
 export const simOpenScene = (worldId, directive) => request.post(`/world/${worldId}/sim/scene`, { directive })
 export const simStep = (worldId, directive) => request.post(`/world/${worldId}/sim/step`, { directive })

@@ -31,14 +31,14 @@
         <span>世界管理</span>
       </button>
 
-      <!-- 演播室：真实推演 -->
+      <!-- 沙盘：真实推演 -->
       <button
         class="tab"
         :class="{ 'tab--active': route.path === '/studio' }"
         @click="$router.push('/studio')"
       >
         <n-icon size="17"><PlanetOutline /></n-icon>
-        <span>演播室</span>
+        <span>沙盘</span>
       </button>
     </div>
 
