@@ -1,7 +1,13 @@
 <template>
   <div class="auth-page">
     <n-card size="huge" class="auth-card" :bordered="false">
-      <div class="title">Persona Chat</div>
+      <div class="brand">
+        <img src="/logo.svg" alt="Aistoria" class="brand__logo" />
+        <div class="brand__text">
+          <div class="brand__name">Aistoria</div>
+          <div class="brand__cn">幻想物语</div>
+        </div>
+      </div>
       <div class="tabs">
         <n-button :type="isLogin ? 'primary' : 'default'" quaternary class="tab-btn" @click="isLogin = true">登录</n-button>
         <n-button :type="!isLogin ? 'primary' : 'default'" quaternary class="tab-btn" @click="isLogin = false">注册</n-button>
@@ -131,12 +137,28 @@ const handleSubmit = async () => {
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.title {
-  font-size: 26px;
-  letter-spacing: 0.2px;
+.brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.brand__logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+}
+.brand__text { text-align: left; line-height: 1.2; }
+.brand__name {
+  font-size: 24px;
   font-weight: 700;
-  margin-bottom: 16px;
-  text-align: center;
+  letter-spacing: 0.4px;
+}
+.brand__cn {
+  font-size: 14px;
+  color: #94a3b8;
+  letter-spacing: 2px;
 }
 
 .tabs {

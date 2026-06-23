@@ -13,7 +13,7 @@ from modules.communication.router import router as communication_router
 from modules.communication.world_router import router as world_router
 from core.security.middleware import attach_user_from_token
 
-app = FastAPI(title="Minimal Layered FastAPI")
+app = FastAPI(title="Aistoria 幻想物语")
 
 app.middleware("http")(attach_user_from_token)
 

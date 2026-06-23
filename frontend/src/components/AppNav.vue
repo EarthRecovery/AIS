@@ -1,7 +1,7 @@
 <template>
   <div class="nav">
     <div class="nav__brand">
-      <n-icon size="20" class="nav__logo"><SparklesOutline /></n-icon>
+      <img src="/logo.svg" alt="Aistoria" class="nav__logo" />
       <span class="nav__title">Aistoria</span>
       <span class="nav__subtitle">幻想物语</span>
     </div>
@@ -46,7 +46,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NIcon, NButton } from 'naive-ui'
 import {
-  ChatbubbleEllipsesOutline, EarthOutline, SparklesOutline, LogOutOutline,
+  ChatbubbleEllipsesOutline, EarthOutline, LogOutOutline,
 } from '@vicons/ionicons5'
 
 const route = useRoute()
@@ -79,7 +79,7 @@ const logout = () => {
   z-index: 10;
 }
 .nav__brand { display: flex; align-items: center; gap: 8px; }
-.nav__logo { color: #a5b4fc; }
+.nav__logo { width: 26px; height: 26px; border-radius: 7px; display: block; }
 .nav__title { font-weight: 700; font-size: 16px; letter-spacing: 0.4px; white-space: nowrap; }
 .nav__subtitle { font-size: 12px; color: #9aa4b8; white-space: nowrap; }
 
