@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from core.rag_engine.indexing.pipeline import Indexing
 from core.rag_engine.indexing.splitter import DataSplitter
+from core.rag_engine.indexing.store import DataStore
 from core.rag_engine.models.openai import OpenAIModel
 from core.rag_engine.models.vectorStore import VectorStore
 import chromadb
@@ -33,6 +34,27 @@ class RagApp:
             self.activate()
         return data
     
+    def index_text(self, text: str, collection_name: str) -> int:
+        """把一段原始文本分段后索引进指定 collection（绕开只支持 moegirl 的 loader）。
+
+        入库与检索都用同名 collection、同一持久化目录(./data/chroma_db)，因此随后
+        以 rag_name=collection 的检索即可命中。返回写入的分段数。
+        """
+        self.deactivate()
+        try:
+            text = (text or "").strip()
+            if not text:
+                return 0
+            docs = [{"page_content": text, "metadata": {"source": "role_knowledge"}}]
+            chunks = DataSplitter().split(docs)
+            DataStore(self.model).store(chunks, collection_name=collection_name)
+            return len(chunks)
+        except Exception as e:
+            print(f"Error indexing text: {e}")
+            return 0
+        finally:
+            self.activate()
+
     def clear_collection(self, collection_name: str):
         vector_store = self.model.get_openai_vector_store_model(
             embedding_model=self.model.get_openai_embedding_model(),

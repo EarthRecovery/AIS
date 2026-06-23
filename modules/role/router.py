@@ -1,12 +1,18 @@
 from fastapi import APIRouter, Depends
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, EmailStr, model_validator
 
 from modules.auth.service import AuthService
+from modules.rag.service import RagService
 from modules.role.service import RoleService
 from storage.models.role_setting import RoleSetting
 
 
 router = APIRouter(prefix="/role", tags=["role"])
+
+
+class KnowledgeRequest(BaseModel):
+    text: str
 
 class ExampleDialogue(BaseModel):
     role: str
@@ -65,4 +71,25 @@ async def list_roles(svc: RoleService = Depends()):
             "settings": role.settings,
         })
     return {"roles": role_list}
+
+
+@router.post("/{role_id}/knowledge")
+async def add_role_knowledge(
+    role_id: int,
+    req: KnowledgeRequest,
+    svc: RoleService = Depends(),
+    rag: RagService = Depends(),
+):
+    """把一段文本作为该角色的知识库：后端分段索引到 collection=role_<id>，
+    并把角色的 rag_name 指向该 collection，使对话时能检索到。"""
+    text = (req.text or "").strip()
+    if not text:
+        return {"success": False, "error": "知识内容为空"}
+    if not rag.is_service_available():
+        return {"success": False, "error": "RAG 服务不可用"}
+    collection = f"role_{role_id}"
+    # 索引（含 OpenAI 嵌入，阻塞）放到线程池，避免卡住事件循环
+    count = await run_in_threadpool(rag.index_text, text, collection)
+    await svc.set_rag_name(role_id, collection)
+    return {"success": True, "chunks": count, "rag_name": collection}
     

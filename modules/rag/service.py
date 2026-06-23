@@ -9,6 +9,9 @@ class RagService:
 
     def add_context(self, context: str, channel: str = "default"):
         return self.rag.add_context(context, channel)
+
+    def index_text(self, text: str, collection_name: str) -> int:
+        return self.rag.index_text(text, collection_name)
     
     def is_service_available(self):
         return self.rag.is_active()

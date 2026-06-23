@@ -8,6 +8,9 @@ class RAGClient:
 
     def add_context(self, context: str, channel: str = "default"):
         return self.app.add_context(context, channel)
+
+    def index_text(self, text: str, collection_name: str) -> int:
+        return self.app.index_text(text, collection_name)
     
     def is_active(self):
         return self.app.get_active_status()

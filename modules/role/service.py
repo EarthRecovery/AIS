@@ -49,6 +49,19 @@ class RoleService:
             return role_setting
         return None
     
+    async def set_rag_name(self, role_id: int, rag_name: str):
+        result = await self.db.execute(select(Role).where(Role.id == role_id))
+        role = result.scalars().first()
+        if not role:
+            return None
+        # 重新赋一个新 dict，确保 JSON 列被标记为已变更
+        settings = dict(role.settings or {})
+        settings["rag_name"] = rag_name
+        role.settings = settings
+        await self.db.commit()
+        await self.db.refresh(role)
+        return role
+
     async def get_role_name_by_id(self, role_id: int):
         result = await self.db.execute(
             select(Role).where(Role.id == role_id)

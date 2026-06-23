@@ -8,3 +8,8 @@ export function getRoleList() {
 export function setRole(payload) {
   return request.post('/role/set', payload)
 }
+
+// 给角色添加知识库：后端分段索引并把该角色 rag_name 指向对应 collection
+export function addRoleKnowledge(roleId, text) {
+  return request.post(`/role/${roleId}/knowledge`, { text })
+}
