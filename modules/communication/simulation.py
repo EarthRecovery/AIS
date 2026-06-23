@@ -94,16 +94,26 @@ class SimulationService:
         # 这一天的第一幕 → 先拍快照（用于回退一天）
         if not await self._day_has_scene(world_id, day):
             await self.ws._snapshot_world(world_id)
-        # 结束当前进行中的场景
+        ctx, _, _, chars = await self.ws._director_context(world_id)
+
+        # 结束当前进行中的场景，并为「下一幕」准备衔接上下文（尾段对话 + 各角色当前位置）
         cur = await self._active_scene(world_id)
+        prev_scene = None
         if cur:
+            tail_msgs = (await self.cs.get_messages(cur.id))[-6:]
+            loc_bits = []
+            for c in chars:
+                loc = await self._get(Location, c.current_location_id) if c.current_location_id else None
+                loc_bits.append(f"{c.name}@{loc.name if loc else '未知'}")
+            prev_scene = {
+                "name": cur.name,
+                "recent": [{"speaker": m.speaker_name, "content": m.content} for m in tail_msgs],
+                "locations": "，".join(loc_bits),
+            }
             cur.status = "ended"
             await self.db.commit()
 
-        ctx, _, _, chars = await self.ws._director_context(world_id)
-        prev = [s.name for s in (await self.db.execute(
-            select(Scene).where(Scene.world_id == world_id, Scene.day_label == day))).scalars().all()]
-        plan = await self.llm.keeper_open_scene(ctx, directive, prev)
+        plan = await self.llm.keeper_open_scene(ctx, directive, prev_scene)
 
         scene = Scene(user_id=world.user_id, world_id=world_id, worldview_id=world.worldview_id,
                       name=plan.get("name", "新场景"), scenario=plan.get("setting", ""),

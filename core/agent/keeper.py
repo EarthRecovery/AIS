@@ -138,29 +138,51 @@ class KeeperAgent:
         data.setdefault("scene", {"should_switch": False})
         return data
 
-    async def open_scene(self, world_context: dict, directive: str = "", prev_summaries=None):
-        """世界导演：为当前这一天开启一个新场景（决定地点/情境/在场角色）。"""
+    async def open_scene(self, world_context: dict, directive: str = "", prev_scene=None):
+        """世界导演：开启一个场景。
+
+        prev_scene 非空表示这是承接上一幕的「下一幕」，需自然衔接（上一幕已到角色
+        离场/转场的节点）。场景在场角色可以只有 1 人（主角独处/内心戏/单人行动）。
+        """
         chars = world_context.get("characters") or []
         names = [c["name"] for c in chars]
         char_lines = "\n".join(f"- {c['name']}：{c.get('summary') or ''}" for c in chars) or "-（无）"
-        prev = "\n".join(f"- {s}" for s in (prev_summaries or [])) or "-（这是今天第一幕）"
         wv = world_context.get("worldview") or {}
+
+        if prev_scene:
+            tail = "\n".join(f"{d['speaker']}：{d['content']}" for d in (prev_scene.get("recent") or []))
+            prev_block = (
+                f"【上一幕：{prev_scene.get('name', '')}】\n{tail or '（无对话）'}\n"
+                f"【各角色当前所在】{prev_scene.get('locations') or '未知'}"
+            )
+            continuity = (
+                "这是承接上一幕的【下一幕】。上一幕已推进到有角色离开场景 / 转场的节点，"
+                "请自然衔接到下一幕：可以跟随某个离场的角色到新地点、切到同一时刻别处发生的事、"
+                "或让时间推进到下一段，保持因果与情绪的连续。"
+            )
+        else:
+            prev_block = "（这是今天的第一幕）"
+            continuity = "请为这一天开启第一幕。"
+
         sys = SystemMessage(content=(
-            "你是持久世界的「世界导演」。请为当前这一天开启一个新的场景（一幕戏）。"
-            "选择一个地点/情境，并挑选 2 个或以上在场角色，让剧情能自然展开。"
-            "只输出 JSON：{\"name\":\"场景名\",\"setting\":\"场景情境(一两句)\",\"participants\":[\"角色名\"]}"
+            "你是持久世界的「世界导演」。" + continuity +
+            "选择地点/情境，并挑选在场角色——通常 2 人或以上；"
+            "但若是主角/重要角色独处、内心戏或单人行动，可以只有 1 人。"
+            "只输出 JSON：{\"name\":\"场景名\",\"setting\":\"情境(一两句，交代清楚和上一幕怎么衔接)\","
+            "\"participants\":[\"角色名\"]}"
         ))
         human = HumanMessage(content=(
             f"【世界观】{wv.get('description') or ''}\n【背景(仅你可见)】{wv.get('background') or ''}\n"
-            f"【可用角色】\n{char_lines}\n【今天已发生的幕】\n{prev}\n"
-            f"【导演指示】{directive.strip() or '（无）'}\n请开启下一幕，输出 JSON。"
+            f"【可用角色】\n{char_lines}\n{prev_block}\n"
+            f"【导演指示】{directive.strip() or '（无）'}\n请输出场景 JSON。"
         ))
         try:
             data = _parse_json(getattr(await self.llm.ainvoke([sys, human]), "content", "") or "")
         except Exception:
             data = {}
+        # 尊重导演给的人数（含 1 人）；只有完全没给时才兜底
         if not data.get("participants"):
-            data["participants"] = names[:3]
+            data["participants"] = names[:2]
         data.setdefault("name", "新场景")
         data.setdefault("setting", "")
         return data
