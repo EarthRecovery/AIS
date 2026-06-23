@@ -3,7 +3,7 @@
     <div class="nav__brand">
       <n-icon size="20" class="nav__logo"><SparklesOutline /></n-icon>
       <span class="nav__title">Aistoria</span>
-      <span class="nav__subtitle">艾史界</span>
+      <span class="nav__subtitle">幻想物语</span>
     </div>
 
     <div class="nav__tabs">
