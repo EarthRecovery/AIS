@@ -11,8 +11,11 @@
         placeholder="基础人格（可选）"
         style="max-width: 220px"
       />
-      <n-button size="small" type="primary" :disabled="!form.name.trim()" @click="add">+ 新建角色</n-button>
+      <n-button size="small" tertiary @click="showRoleCreate = true">+ 人格</n-button>
+      <n-button size="small" type="primary" :disabled="!form.name.trim()" @click="add">＋ 加入世界</n-button>
     </div>
+
+    <RoleCreateModal v-model:show="showRoleCreate" @created="handleRoleCreated" />
 
     <n-collapse v-if="store.characters.length">
       <n-collapse-item
@@ -35,11 +38,20 @@ import { useWorldStore } from '@/store/World'
 import { createCharacter } from '@/api/world'
 import { getRoleList } from '@/api/role'
 import CharacterCard from './CharacterCard.vue'
+import RoleCreateModal from '@/components/RoleCreateModal.vue'
 
 const store = useWorldStore()
 const form = reactive({ name: '', role_id: null })
 const roleOptions = ref([])
 const loadingRoles = ref(false)
+const showRoleCreate = ref(false)
+
+const handleRoleCreated = async ({ id, name }) => {
+  await loadRoles()
+  if (id) form.role_id = id
+  // 顺手把新建角色名带入"加入世界"的名称，省一步输入
+  if (name && !form.name.trim()) form.name = name
+}
 
 const loadRoles = async () => {
   loadingRoles.value = true

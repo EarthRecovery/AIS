@@ -12,6 +12,9 @@
           placeholder="选择角色"
           class="upper_select"
         />
+        <n-button @click="showRoleCreate = true" class="upper_button">
+          新建角色
+        </n-button>
         <n-button type="primary" @click="handleStartNewChat" :loading="isStarting" class="upper_button">
           新建对话
         </n-button>
@@ -56,6 +59,7 @@
       @close="handleCloseSettings"
       @submit="handleSubmitSettings"
     />
+    <RoleCreateModal v-model:show="showRoleCreate" @created="handleRoleCreated" />
   </div>
 </template>
 
@@ -65,6 +69,7 @@ import { NScrollbar, NButton, NSelect } from 'naive-ui'
 import { useTurnHistoryStore } from '@/store/TurnHistory'
 import { useChatHistoryStore } from '@/store/ChatHistory'
 import SettingsPanel from './SettingsPanel.vue'
+import RoleCreateModal from './RoleCreateModal.vue'
 import { getRoleList } from '@/api/role'
 
 const turnHistoryStore = useTurnHistoryStore()
@@ -73,10 +78,16 @@ const histories = computed(() => turnHistoryStore.turn_history)
 const isStarting = ref(false)
 const isSwitching = ref(false)
 const showSettings = ref(false)
+const showRoleCreate = ref(false)
 const activeTurnId = computed(() => chatHistoryStore.history_id)
 const selectedRoleId = ref(null)
 const roleOptions = ref([])
 const isLoadingRoles = ref(false)
+
+const handleRoleCreated = async ({ id }) => {
+  await loadRoles()
+  if (id) selectedRoleId.value = id
+}
 
 const loadHistory = async () => {
   try {
