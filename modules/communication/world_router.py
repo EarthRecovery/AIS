@@ -426,13 +426,24 @@ async def sim_step_stream(world_id: int, req: SimDirective, svc: SimulationServi
     return StreamingResponse(gen(), media_type="text/event-stream", headers={
         "Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"})
 
-@router.post("/{world_id}/sim/run-day")
-async def sim_run_day(world_id: int, req: SimDirective, svc: SimulationService = Depends()):
-    return await svc.run_day(world_id, req.directive or "")
+@router.post("/{world_id}/sim/new-chapter")
+async def sim_new_chapter(world_id: int, req: SimDirective, svc: SimulationService = Depends()):
+    """新建章节：拍快照 → 进入下一章 → 开本章第一幕。"""
+    return await svc.new_chapter(world_id, req.directive or "")
 
-@router.post("/{world_id}/sim/rollback-day")
-async def sim_rollback(world_id: int, svc: SimulationService = Depends()):
-    return await svc.rollback_day(world_id)
+@router.post("/{world_id}/sim/run-chapter")
+async def sim_run_chapter(world_id: int, req: SimDirective, svc: SimulationService = Depends()):
+    return await svc.run_chapter(world_id, req.directive or "")
+
+@router.post("/{world_id}/sim/rollback-chapter")
+async def sim_rollback_chapter(world_id: int, svc: SimulationService = Depends()):
+    """回退章节：恢复最近一张快照（本章开篇前的状态）。"""
+    return await svc.rollback_chapter(world_id)
+
+@router.get("/{world_id}/character/{char_id}/detail")
+async def character_detail(world_id: int, char_id: int, svc: WorldService = Depends()):
+    d = await svc.character_detail(world_id, char_id)
+    return d or {"error": "not found"}
 
 @router.get("/scene/{scene_id}/messages")
 async def sim_scene_messages(scene_id: int, svc: SimulationService = Depends()):

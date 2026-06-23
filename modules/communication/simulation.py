@@ -97,20 +97,23 @@ class SimulationService:
         return {"messages": [{"speaker_type": m.speaker_type, "speaker_name": m.speaker_name,
                               "content": m.content} for m in msgs]}
 
-    # ---------------- 开场景 ----------------
-    async def _day_has_scene(self, world_id, day_label):
-        n = (await self.db.execute(
-            select(Scene).where(Scene.world_id == world_id, Scene.day_label == day_label)
-            .limit(1))).scalar_one_or_none()
-        return n is not None
+    # ---------------- 章节 / 开场景 ----------------
+    @staticmethod
+    def _chapter_label(world):
+        """当前章节名：优先用剧本大纲里该章的标题，否则「第N章」。"""
+        outline = world.outline or []
+        idx = world.beat_index or 0
+        if outline and 0 <= idx < len(outline) and outline[idx].get("title"):
+            return f"第{idx + 1}章 {outline[idx]['title']}"
+        return f"第{idx + 1}章"
 
     async def open_scene(self, world_id, directive: str = ""):
         world = await self._get(World, world_id)
         if world is None:
             return {"error": "世界不存在"}
-        day = world.in_world_time
-        # 这一天的第一幕 → 先拍快照（用于回退一天）
-        if not await self._day_has_scene(world_id, day):
+        chapter = self._chapter_label(world)
+        # 整个世界还没有任何快照（即第一章开篇）→ 先拍一张，作为「回退章节」的起点
+        if not await self.ws.has_snapshot(world_id):
             await self.ws._snapshot_world(world_id)
         ctx, _, _, chars = await self.ws._director_context(world_id)
 
@@ -135,7 +138,7 @@ class SimulationService:
 
         scene = Scene(user_id=world.user_id, world_id=world_id, worldview_id=world.worldview_id,
                       name=plan.get("name", "新场景"), scenario=plan.get("setting", ""),
-                      status="active", day_label=day,
+                      status="active", day_label=chapter,
                       prev_scene_id=(cur.id if cur else None))
         self.db.add(scene)
         await self.db.commit()
@@ -152,14 +155,37 @@ class SimulationService:
                 ch = await self.ws.create_character(world_id, nm)
                 by_name[nm] = ch
                 await self.ws.log_event(world_id, "character_spawn", f"新角色登场：{nm}",
-                                        {}, actor=ch.id, in_world_time=day)
+                                        {}, actor=ch.id, in_world_time=chapter)
             self.db.add(SceneParticipant(scene_id=scene.id, role_id=ch.role_id,
                         character_id=ch.id, role_name=nm, display_order=order))
         await self.db.commit()
         await self.ws.log_event(world_id, "scene_open", f"开启场景：{scene.name}",
-                                {"scene_id": scene.id}, in_world_time=day)
+                                {"scene_id": scene.id}, in_world_time=chapter)
         return {"scene_id": scene.id, "name": scene.name, "scenario": scene.scenario,
                 "participants": plan.get("participants", [])}
+
+    async def new_chapter(self, world_id, directive: str = ""):
+        """新建章节：拍快照(回退章节用) → 进入下一章 → 开本章第一幕。"""
+        world = await self._get(World, world_id)
+        if world is None:
+            return {"error": "世界不存在"}
+        # 拍快照（捕获当前章节进度，回退章节即恢复到此）
+        await self.ws._snapshot_world(world_id)
+        # 结束当前场景，章节 +1
+        cur = await self._active_scene(world_id)
+        if cur:
+            cur.status = "ended"
+        world.beat_index = (world.beat_index or 0) + 1
+        await self.db.commit()
+        chapter = self._chapter_label(world)
+        await self.ws.log_event(world_id, "chapter_new", f"进入{chapter}",
+                                {"beat_index": world.beat_index}, in_world_time=chapter)
+        opened = await self.open_scene(world_id, directive)
+        return {"chapter": chapter, "beat_index": world.beat_index, **opened}
+
+    async def rollback_chapter(self, world_id):
+        """回退章节：恢复最近一张快照（本章开篇前的状态）。"""
+        return await self.ws.rollback_day(world_id)
 
     # ---------------- 跑一轮对话 + 世界裁判 ----------------
     async def _speaker_inputs(self, world_id, scene, part):
@@ -185,7 +211,10 @@ class SimulationService:
         return text.strip()
 
     async def _run_judge(self, world_id, scene, round_dialogue):
-        """世界裁判结算这一轮，返回 (applied, end_scene, end_day)。"""
+        """世界裁判结算这一轮，返回 (applied, end_scene, chapter_done)。
+
+        章节按用户「新建章节」手动推进，这里不自动跳章；chapter_done 仅作提示。
+        """
         chars = await self.ws._all(Character, world_id=world_id)
         by_name = {c.name: c for c in chars}
         ctx, _, _, _ = await self.ws._director_context(world_id)
@@ -199,19 +228,14 @@ class SimulationService:
         verdict = await self.llm.keeper_judge_round(ctx, scene.scenario, round_dialogue, char_state)
         applied = await self._apply_verdict(world_id, scene, verdict, by_name)
         sc = verdict.get("scene", {}) or {}
-        end_scene = bool(sc.get("should_end"))
-        end_day = bool(sc.get("should_end_day"))
-        # 剧本节拍达成 → 推进到下一个节拍
-        if sc.get("beat_done"):
-            await self.ws.advance_beat(world_id)
-        if end_scene or end_day:
+        end_scene = bool(sc.get("should_end") or sc.get("should_end_day"))
+        chapter_done = bool(sc.get("beat_done"))
+        if end_scene:
             scene.status = "ended"
             await self.db.commit()
             # 幕结束 → 给在场角色做记忆沉淀（保留最近 2 幕不沉淀）
             await self._consolidate_participants(world_id, scene)
-        if end_day:
-            await self._advance_time(world_id)
-        return applied, end_scene, end_day
+        return applied, end_scene, chapter_done
 
     async def _consolidate_participants(self, world_id, scene):
         recent_ids = [s.id for s in (await self.db.execute(
@@ -246,10 +270,10 @@ class SimulationService:
             await self.cs.add_message(scene.id, "persona", p.role_name, line, speaker_role_id=p.role_id)
             round_dialogue.append({"speaker": p.role_name, "content": line})
 
-        applied, end_scene, end_day = await self._run_judge(world_id, scene, round_dialogue)
+        applied, end_scene, chapter_done = await self._run_judge(world_id, scene, round_dialogue)
         return {"scene_id": scene.id, "round": round_dialogue, "applied": applied,
-                "scene_ended": end_scene or end_day, "day_ended": end_day,
-                "active_scene_id": (await self._active_scene(world_id) or scene).id if not (end_scene or end_day) else None}
+                "scene_ended": end_scene, "chapter_done": chapter_done,
+                "active_scene_id": (await self._active_scene(world_id) or scene).id if not end_scene else None}
 
     async def step_round_stream(self, world_id, directive: str = ""):
         """流式版：逐 token 吐出每个角色的发言，最后吐裁判结算。yields 事件 dict。"""
@@ -291,9 +315,9 @@ class SimulationService:
             yield {"type": "speaker_done", "name": p.role_name}
 
         yield {"type": "judging"}
-        applied, end_scene, end_day = await self._run_judge(world_id, scene, round_dialogue)
+        applied, end_scene, chapter_done = await self._run_judge(world_id, scene, round_dialogue)
         yield {"type": "judge", "applied": applied,
-               "scene_ended": end_scene or end_day, "day_ended": end_day}
+               "scene_ended": end_scene, "chapter_done": chapter_done}
         yield {"type": "done"}
 
     async def _apply_verdict(self, world_id, scene, verdict, by_name):
@@ -389,36 +413,28 @@ class SimulationService:
                                     {"before": cur, "after": nxt}, in_world_time=nxt)
         return nxt
 
-    # ---------------- 一键自动跑完一天 ----------------
-    async def run_day(self, world_id, directive: str = ""):
-        await self.open_scene(world_id, directive)
+    # ---------------- 一键自动跑本章（若干幕/轮，有上限）----------------
+    async def run_chapter(self, world_id, directive: str = ""):
+        if await self._active_scene(world_id) is None:
+            await self.open_scene(world_id, directive)
         scenes_run, rounds_run = 1, 0
-        day_ended = False
-        while scenes_run <= MAX_SCENES_PER_DAY and not day_ended:
+        while scenes_run <= MAX_SCENES_PER_DAY:
             scene_rounds = 0
+            scene_ended = False
             while scene_rounds < MAX_ROUNDS_PER_SCENE:
                 res = await self.step_round(world_id, directive)
                 rounds_run += 1
                 scene_rounds += 1
-                if res.get("day_ended"):
-                    day_ended = True
-                    break
                 if res.get("scene_ended"):
+                    scene_ended = True
                     break
-            if day_ended:
+            if scenes_run >= MAX_SCENES_PER_DAY:
                 break
-            if scenes_run < MAX_SCENES_PER_DAY:
+            if scene_ended:
                 await self.open_scene(world_id, directive)
                 scenes_run += 1
             else:
                 break
-        if not day_ended:
-            await self._advance_time(world_id)
-            # 收尾：结束仍开着的场景
-            cur = await self._active_scene(world_id)
-            if cur:
-                cur.status = "ended"
-                await self.db.commit()
         return {"success": True, "scenes": scenes_run, "rounds": rounds_run}
 
     async def rollback_day(self, world_id):

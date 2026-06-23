@@ -320,6 +320,36 @@ class WorldService:
             "scene_knowledge": [s.content for s in scene_k],
         }
 
+    async def character_detail(self, world_id, char_id):
+        """单个角色的详细信息 + 短期/长期记忆（给前端角色详情面板）。"""
+        c = await self._get(Character, char_id)
+        if c is None:
+            return None
+        loc = await self._get(Location, c.current_location_id) if c.current_location_id else None
+        ms = await self.get_mental(char_id)
+        abilities = await self._all(Ability, character_id=char_id)
+        items = (await self.db.execute(select(Item).where(
+            Item.world_id == world_id, Item.owner_character_id == char_id))).scalars().all()
+        chars = await self._all(Character, world_id=world_id)
+        name_of = {x.id: x.name for x in chars}
+        rels = (await self.db.execute(select(Relationship).where(
+            Relationship.world_id == world_id, Relationship.from_character_id == char_id))).scalars().all()
+        perc = await self.build_perception(world_id, char_id, None)
+        return {
+            "id": c.id, "name": c.name, "status": c.status,
+            "location": loc.name if loc else None, "stats": c.stats or {},
+            "mental": (None if ms is None else {
+                "mood": ms.mood, "goals": ms.goals, "motivation": ms.motivation,
+                "self_summary": ms.self_summary}),
+            "abilities": [{"name": a.name, "level": a.level, "description": a.description} for a in abilities],
+            "items": [{"name": i.name, "description": i.description} for i in items],
+            "relationships": [{"to": name_of.get(r.to_character_id, f"#{r.to_character_id}"),
+                               "relation_type": r.relation_type, "affinity": r.affinity,
+                               "notes": r.notes} for r in rels],
+            "short_term": perc.get("short_term", []),
+            "long_term": perc.get("long_term", []),
+        }
+
     # ---- 角色按名查找（Keeper 把名字解析回 character_id）----
     async def character_by_name(self, world_id, name):
         res = await self.db.execute(
@@ -659,7 +689,7 @@ class WorldService:
 
         state = {
             "world": {"in_world_time": world.in_world_time, "worldview_id": world.worldview_id,
-                      "status": world.status},
+                      "status": world.status, "beat_index": world.beat_index, "outline": world.outline},
             "worldview": (self._row(wv, ["id", "description", "rules", "background"]) if wv else None),
             "characters": [self._row(c, self._SNAP_FIELDS["character"]) for c in chars],
             "mental_states": mentals,
@@ -739,6 +769,10 @@ class WorldService:
             world.in_world_time = w.get("in_world_time", world.in_world_time)
             world.worldview_id = w.get("worldview_id", world.worldview_id)
             world.status = w.get("status", world.status)
+            if "beat_index" in w:
+                world.beat_index = w.get("beat_index") or 0
+            if "outline" in w:
+                world.outline = w.get("outline")
         wv_snap = st.get("worldview")
         if wv_snap:
             wv = await self._get(Worldview, wv_snap["id"])

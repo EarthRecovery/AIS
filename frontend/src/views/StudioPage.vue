@@ -38,7 +38,7 @@
         <div class="section section--chars" v-if="store.worldId">
           <div class="section__title"><n-icon><PeopleOutline /></n-icon> 角色状态</div>
           <n-scrollbar style="flex:1; min-height:0">
-            <div v-for="c in store.characters" :key="c.id" class="char">
+            <div v-for="c in store.characters" :key="c.id" class="char" @click="store.openChar(c.id)">
               <div class="char__head">
                 <span class="avatar" :style="{ background: color(c.id) }">{{ first(c.name) }}</span>
                 <span class="char__name">{{ c.name }}</span>
@@ -101,11 +101,14 @@
               <n-button :loading="store.busy" :disabled="store.busy" @click="nextScene">
                 <template #icon><n-icon><PlayForwardOutline /></n-icon></template>下一幕
               </n-button>
-              <n-button type="primary" :loading="store.busy" :disabled="store.busy" @click="runDay">
-                <template #icon><n-icon><FlashOutline /></n-icon></template>自动跑完一天
+              <n-button type="primary" :loading="store.busy" :disabled="store.busy" @click="newChapter">
+                <template #icon><n-icon><BookOutline /></n-icon></template>新建章节
+              </n-button>
+              <n-button :loading="store.busy" :disabled="store.busy" @click="runChapter">
+                <template #icon><n-icon><FlashOutline /></n-icon></template>自动跑本章
               </n-button>
               <n-button :disabled="!store.canRollback || store.busy" @click="rollback">
-                <template #icon><n-icon><ArrowUndoOutline /></n-icon></template>回退一天
+                <template #icon><n-icon><ArrowUndoOutline /></n-icon></template>回退章节
               </n-button>
             </div>
           </div>
@@ -117,12 +120,66 @@
         </div>
       </div>
     </div>
+
+    <!-- 角色详情 -->
+    <n-drawer v-model:show="store.showChar" :width="420" placement="right">
+      <n-drawer-content v-if="store.charDetail" :title="store.charDetail.name" closable>
+        <div class="cd">
+          <div class="cd__row"><b>状态</b><span>{{ store.charDetail.status }} · {{ store.charDetail.location || '位置未知' }}</span></div>
+          <div class="cd__stats">
+            <span v-for="(v, k) in store.charDetail.stats" :key="k" class="cd__stat">{{ statLabel(k) }} {{ v }}</span>
+          </div>
+
+          <div v-if="cdMental" class="cd__sec">
+            <div class="cd__h">长期自我认知</div>
+            <div class="cd__body">{{ cdMental.self_summary || '（暂无）' }}</div>
+            <div v-if="cdMental.mood || cdMental.goals" class="cd__sub">
+              <span v-if="cdMental.mood">心情：{{ cdMental.mood }}　</span>
+              <span v-if="cdMental.goals">目标：{{ cdMental.goals }}</span>
+            </div>
+          </div>
+
+          <div class="cd__sec">
+            <div class="cd__h">长期记忆（印象深刻）</div>
+            <div v-if="store.charDetail.long_term.length" class="cd__mems">
+              <div v-for="(m, i) in store.charDetail.long_term" :key="i" class="cd__mem">· {{ m.content }}</div>
+            </div>
+            <div v-else class="cd__empty">（暂无）</div>
+          </div>
+
+          <div class="cd__sec">
+            <div class="cd__h">短期记忆（最近几个章节）</div>
+            <div v-if="store.charDetail.short_term.length" class="cd__mems">
+              <div v-for="(m, i) in store.charDetail.short_term" :key="i" class="cd__mem">· {{ m.content }}</div>
+            </div>
+            <div v-else class="cd__empty">（暂无）</div>
+          </div>
+
+          <div class="cd__sec" v-if="store.charDetail.relationships.length">
+            <div class="cd__h">关系</div>
+            <div v-for="(r, i) in store.charDetail.relationships" :key="i" class="cd__rel">
+              → {{ r.to }}：{{ r.relation_type }}（好感 {{ r.affinity }}）
+            </div>
+          </div>
+
+          <div class="cd__sec" v-if="store.charDetail.items.length">
+            <div class="cd__h">物品</div>
+            <span v-for="(it, i) in store.charDetail.items" :key="i" class="cd__item">{{ it.name }}</span>
+          </div>
+
+          <div class="cd__sec" v-if="store.charDetail.abilities.length">
+            <div class="cd__h">能力</div>
+            <span v-for="(a, i) in store.charDetail.abilities" :key="i" class="cd__item">{{ a.name }} lv{{ a.level }}</span>
+          </div>
+        </div>
+      </n-drawer-content>
+    </n-drawer>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref, watch, nextTick } from 'vue'
-import { NSelect, NScrollbar, NButton, NInput, NIcon, NTag, useMessage } from 'naive-ui'
+import { NSelect, NScrollbar, NButton, NInput, NIcon, NTag, NDrawer, NDrawerContent, useMessage } from 'naive-ui'
 import {
   PlanetOutline, TimeOutline, PeopleOutline, PlayOutline,
   PlayForwardOutline, FlashOutline, ArrowUndoOutline, BookOutline,
@@ -151,6 +208,7 @@ const genOutline = async () => {
 }
 
 const worldOptions = computed(() => store.worlds.map((w) => ({ label: w.name, value: w.id })))
+const cdMental = computed(() => store.charDetail?.mental)
 
 const PALETTE = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#db2777', '#0891b2', '#65a30d']
 const color = (id) => PALETTE[Math.abs(Number(id) || 0) % PALETTE.length]
@@ -197,15 +255,26 @@ const nextScene = async () => {
     message.error(e?.code === 'ECONNABORTED' ? '开场景超时，请重试' : '开场景失败，请重试')
   }
 }
-const runDay = async () => {
+const newChapter = async () => {
   try {
-    const r = await store.runDay(directive.value)
+    const r = await store.newChapter(directive.value)
     directive.value = ''
-    if (r?.data?.success) message.success(`这一天推完：${r.data.scenes} 幕 / ${r.data.rounds} 轮`)
+    if (r?.data?.chapter) message.success(`进入${r.data.chapter}`)
     scrollBottom()
   } catch (e) {
-    console.error('run day failed', e)
-    message.error(e?.code === 'ECONNABORTED' ? '自动推演超时（这一天内容较多），请重试或改用「下一轮」' : '自动推演失败，请重试')
+    console.error('new chapter failed', e)
+    message.error('新建章节失败，请重试')
+  }
+}
+const runChapter = async () => {
+  try {
+    const r = await store.runChapter(directive.value)
+    directive.value = ''
+    if (r?.data?.success) message.success(`本章推完：${r.data.scenes} 幕 / ${r.data.rounds} 轮`)
+    scrollBottom()
+  } catch (e) {
+    console.error('run chapter failed', e)
+    message.error(e?.code === 'ECONNABORTED' ? '自动推演超时，请重试或改用「下一轮」' : '自动推演失败，请重试')
   }
 }
 const rollback = async () => {
@@ -226,7 +295,8 @@ onMounted(() => store.fetchWorlds())
 .section { display: flex; flex-direction: column; gap: 8px; }
 .section--chars { flex: 1 1 auto; min-height: 0; }
 .section__title { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; }
-.char { background: var(--c-sidebar-soft); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+.char { background: var(--c-sidebar-soft); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; cursor: pointer; transition: background 0.15s; }
+.char:hover { background: #3a4255; }
 .char__head { display: flex; align-items: center; gap: 8px; }
 .char__name { font-size: 14px; font-weight: 600; flex: 1; }
 .char__loc { font-size: 11px; color: #9aa4b8; }
@@ -275,4 +345,19 @@ onMounted(() => store.fetchWorlds())
 .placeholder__icon { color: #c7cdd9; }
 .placeholder__title { color: var(--c-text-soft); font-size: 16px; font-weight: 600; }
 .placeholder__sub { color: var(--c-text-faint); font-size: 13px; }
+
+/* 角色详情抽屉 */
+.cd { display: flex; flex-direction: column; gap: 14px; }
+.cd__row { display: flex; justify-content: space-between; font-size: 13px; color: #475569; }
+.cd__stats { display: flex; flex-wrap: wrap; gap: 6px; }
+.cd__stat { font-size: 12px; background: #eef2ff; color: #4f46e5; border-radius: 999px; padding: 2px 10px; }
+.cd__sec { border-top: 1px solid #eef1f5; padding-top: 10px; }
+.cd__h { font-size: 13px; font-weight: 700; color: #1e293b; margin-bottom: 6px; }
+.cd__body { font-size: 13px; line-height: 1.6; color: #334155; white-space: pre-wrap; }
+.cd__sub { font-size: 12px; color: #64748b; margin-top: 6px; }
+.cd__mems { display: flex; flex-direction: column; gap: 4px; }
+.cd__mem { font-size: 13px; line-height: 1.5; color: #334155; }
+.cd__empty { font-size: 12px; color: #94a3b8; }
+.cd__rel { font-size: 13px; color: #334155; }
+.cd__item { display: inline-block; font-size: 12px; background: #f1f5f9; color: #475569; border-radius: 8px; padding: 2px 10px; margin: 0 6px 6px 0; }
 </style>

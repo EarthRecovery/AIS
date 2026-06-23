@@ -15,6 +15,9 @@ export const useStudioStore = defineStore('studio', {
     beat: null,
     canRollback: false,
     busy: false,
+    // 角色详情面板
+    charDetail: null,
+    showChar: false,
   }),
   actions: {
     async fetchWorlds() {
@@ -96,7 +99,15 @@ export const useStudioStore = defineStore('studio', {
         this.busy = false
       }
     },
-    runDay(directive) { return this._run(() => api.simRunDay(this.worldId, directive || '')) },
-    rollback() { return this._run(() => api.simRollbackDay(this.worldId)) },
+    newChapter(directive) { return this._run(() => api.simNewChapter(this.worldId, directive || '')) },
+    runChapter(directive) { return this._run(() => api.simRunChapter(this.worldId, directive || '')) },
+    rollback() { return this._run(() => api.simRollbackChapter(this.worldId)) },
+
+    async openChar(charId) {
+      if (!this.worldId) return
+      const res = await api.charDetail(this.worldId, charId)
+      this.charDetail = res.data || null
+      this.showChar = true
+    },
   },
 })
