@@ -20,7 +20,7 @@
                 {{ store.outline.length ? '重写' : '生成' }}
               </n-button>
             </div>
-            <div v-show="showOutline" class="sec__body">
+            <div v-show="showOutline" class="sec__body outline-body">
               <div v-for="(b, i) in editOutline" :key="i" class="ol">
                 <div class="ol__row">
                   <span class="ol__no" :class="{ 'ol__no--cur': i === store.beatIndex }">{{ i + 1 }}</span>
@@ -37,26 +37,30 @@
             </div>
           </div>
 
-          <!-- 章节 → 场景 两层目录 -->
+          <!-- 章节 → 场景 两层目录（很多章节时可滚动） -->
           <div class="sec sec--tree">
             <div class="sec__title">章节 / 场景</div>
             <n-scrollbar style="flex:1; min-height:0">
-              <div v-for="ch in store.chapters" :key="ch.label" class="ch">
-                <div class="ch__head" @click="toggleCh(ch.label)">
-                  <span>{{ expanded.has(ch.label) ? '▾' : '▸' }}</span>
-                  <span class="ch__name">{{ ch.label }}</span>
-                  <span class="ch__cnt">{{ ch.scenes.length }}</span>
+              <div v-for="node in chapterNodes" :key="node.key" class="ch"
+                :class="{ 'ch--cur': node.current }">
+                <div class="ch__head">
+                  <span class="ch__name">{{ node.title }}</span>
+                  <span class="ch__cnt">{{ node.scenes.length }}</span>
+                  <button class="ch__exp" @click="toggleCh(node.key)">
+                    {{ expanded.has(node.key) ? '▾' : '▸' }}
+                  </button>
                 </div>
-                <div v-show="expanded.has(ch.label)" class="ch__scenes">
-                  <div v-for="s in ch.scenes" :key="s.id" class="sc"
+                <div v-show="expanded.has(node.key)" class="ch__scenes">
+                  <div v-for="s in node.scenes" :key="s.id" class="sc"
                     :class="{ 'sc--active': s.id === store.activeSceneId }"
                     @click="focusScene(s.id)">
                     <span class="sc__dot" :class="s.status === 'active' ? 'sc__dot--on' : ''"></span>
                     {{ s.name }}
                   </div>
+                  <div v-if="!node.scenes.length" class="ch__empty">暂无场景</div>
                 </div>
               </div>
-              <div v-if="!store.scenes.length" class="hint">还没有场景，点「下一轮」开始</div>
+              <div v-if="!chapterNodes.length" class="hint">先生成或新建章节</div>
             </n-scrollbar>
           </div>
 
@@ -218,16 +222,16 @@ const directive = ref('')
 const stageRef = ref(null)
 const genning = ref(false)
 
-const showOutline = ref(true)
+const showOutline = ref(false)
 const showChars = ref(true)
 const expanded = reactive(new Set())
-const toggleCh = (label) => { expanded.has(label) ? expanded.delete(label) : expanded.add(label) }
+const toggleCh = (key) => { expanded.has(key) ? expanded.delete(key) : expanded.add(key) }
 
 // 大纲编辑副本
 const editOutline = ref([])
 watch(() => store.outline, (o) => { editOutline.value = (o || []).map((b) => ({ ...b })) }, { immediate: true, deep: true })
-// 章节默认全展开
-watch(() => store.chapters, (chs) => { chs.forEach((c) => expanded.add(c.label)) }, { immediate: true })
+// 只默认展开「当前章节」，避免上百章全展开
+watch(() => store.beatIndex, (i) => { expanded.add(`第${(i || 0) + 1}章`) }, { immediate: true })
 
 const addBeat = () => editOutline.value.push({ title: '新章节', goal: '' })
 const removeBeat = (i) => editOutline.value.splice(i, 1)
@@ -269,6 +273,23 @@ const saveMental = async () => {
 }
 
 const worldOptions = computed(() => store.worlds.map((w) => ({ label: w.name, value: w.id })))
+
+// 章节树：由大纲驱动（空章也显示），场景按 day_label 前缀「第N章」归到对应章
+const chapterNodes = computed(() => {
+  const out = store.outline || []
+  const scenes = store.scenes || []
+  const matched = new Set()
+  const nodes = out.map((b, i) => {
+    const prefix = `第${i + 1}章`
+    const ss = scenes.filter((s) => (s.day_label || '').startsWith(prefix))
+    ss.forEach((s) => matched.add(s.id))
+    return { key: prefix, title: `${prefix} ${b.title || ''}`, current: i === store.beatIndex, scenes: ss }
+  })
+  // 未匹配到任何大纲章的场景（如旧数据）单独成组
+  const orphans = scenes.filter((s) => !matched.has(s.id))
+  if (orphans.length) nodes.push({ key: '__other__', title: '其它场景', current: false, scenes: orphans })
+  return nodes
+})
 
 const PALETTE = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#db2777', '#0891b2', '#65a30d']
 const color = (id) => PALETTE[Math.abs(Number(id) || 0) % PALETTE.length]
@@ -338,6 +359,8 @@ onMounted(() => store.fetchWorlds())
   font-size: 14px; cursor: pointer; }
 .sec__title { font-weight: 600; font-size: 14px; }
 .sec__body { display: flex; flex-direction: column; gap: 8px; }
+/* 大纲编辑区有很多章时也能滚 */
+.sec__body.outline-body { max-height: 240px; overflow-y: auto; }
 .hint { color: #94a3b8; font-size: 12px; }
 
 /* 大纲编辑 */
@@ -349,12 +372,18 @@ onMounted(() => store.fetchWorlds())
 .ol__actions { display: flex; gap: 8px; }
 
 /* 章节-场景树 */
-.ch { margin-bottom: 4px; }
-.ch__head { display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 5px 4px;
+.ch { margin-bottom: 2px; border-radius: 8px; }
+.ch--cur { background: rgba(99,102,241,0.14); }
+.ch__head { display: flex; align-items: center; gap: 6px; padding: 6px 6px;
   font-size: 13px; font-weight: 600; }
 .ch__name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch--cur .ch__name { color: #c7d2fe; }
 .ch__cnt { font-size: 11px; color: #9aa4b8; }
-.ch__scenes { display: flex; flex-direction: column; }
+.ch__exp { border: none; background: rgba(255,255,255,0.08); color: #cbd5e1; cursor: pointer;
+  width: 22px; height: 22px; border-radius: 6px; font-size: 12px; flex: 0 0 auto; }
+.ch__exp:hover { background: rgba(255,255,255,0.18); }
+.ch__scenes { display: flex; flex-direction: column; padding-bottom: 4px; }
+.ch__empty { font-size: 11px; color: #6b7280; padding: 3px 4px 3px 22px; }
 .sc { display: flex; align-items: center; gap: 6px; padding: 4px 4px 4px 22px; font-size: 12px;
   color: #cbd5e1; cursor: pointer; border-radius: 6px; }
 .sc:hover { background: rgba(255,255,255,0.06); }
