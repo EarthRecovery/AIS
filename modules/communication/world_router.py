@@ -97,6 +97,7 @@ class CharacterUpdate(BaseModel):
     name: str | None = None
     status: str | None = None
     current_location_id: int | None = None
+    stats: dict | None = None
 
 class MentalUpdate(BaseModel):
     mood: str | None = None
@@ -435,6 +436,15 @@ async def sim_new_chapter(world_id: int, req: SimDirective, svc: SimulationServi
 async def sim_run_chapter(world_id: int, req: SimDirective, svc: SimulationService = Depends()):
     return await svc.run_chapter(world_id, req.directive or "")
 
+@router.post("/{world_id}/sim/run-scene")
+async def sim_run_scene(world_id: int, req: SimDirective, svc: SimulationService = Depends()):
+    return await svc.run_scene(world_id, req.directive or "")
+
+@router.post("/{world_id}/sim/rollback")
+async def sim_rollback(world_id: int, svc: SimulationService = Depends()):
+    """回退一步：恢复最近一张快照（撤销上一轮对话 / 上一幕）。"""
+    return await svc.rollback_chapter(world_id)
+
 @router.post("/{world_id}/sim/rollback-chapter")
 async def sim_rollback_chapter(world_id: int, svc: SimulationService = Depends()):
     """回退章节：恢复最近一张快照（本章开篇前的状态）。"""
@@ -451,7 +461,15 @@ async def sim_scene_messages(scene_id: int, svc: SimulationService = Depends()):
 
 
 # ================= 剧本大纲 =================
+class OutlineUpdate(BaseModel):
+    outline: list[dict]
+
 @router.post("/{world_id}/outline/generate")
 async def outline_generate(world_id: int, req: SimDirective, svc: WorldService = Depends()):
     beats = await svc.generate_outline(world_id, req.directive or "")
     return {"outline": beats}
+
+@router.patch("/{world_id}/outline")
+async def outline_update(world_id: int, req: OutlineUpdate, svc: WorldService = Depends()):
+    """用户编辑大纲（章节标题/目标）。"""
+    return {"outline": await svc.update_outline(world_id, req.outline)}

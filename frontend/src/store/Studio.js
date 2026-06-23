@@ -101,13 +101,40 @@ export const useStudioStore = defineStore('studio', {
     },
     newChapter(directive) { return this._run(() => api.simNewChapter(this.worldId, directive || '')) },
     runChapter(directive) { return this._run(() => api.simRunChapter(this.worldId, directive || '')) },
-    rollback() { return this._run(() => api.simRollbackChapter(this.worldId)) },
+    runScene(directive) { return this._run(() => api.simRunScene(this.worldId, directive || '')) },
+    rollback() { return this._run(() => api.simRollback(this.worldId)) },
 
     async openChar(charId) {
       if (!this.worldId) return
       const res = await api.charDetail(this.worldId, charId)
       this.charDetail = res.data || null
       this.showChar = true
+    },
+    async saveCharBasic(charId, payload) {
+      await api.updateCharacter(charId, payload)
+      await this.refresh()
+    },
+    async saveCharMental(charId, payload) {
+      await api.upsertMental(charId, payload)
+      const res = await api.charDetail(this.worldId, charId)
+      this.charDetail = res.data || this.charDetail
+    },
+    async saveOutline(outline) {
+      if (!this.worldId) return
+      await api.updateOutline(this.worldId, outline)
+      await this.refresh()
+    },
+  },
+  getters: {
+    // 章节 -> 该章节下的场景（左栏两层目录）
+    chapters: (s) => {
+      const map = new Map()
+      for (const sc of s.scenes) {
+        const key = sc.day_label || '未分章'
+        if (!map.has(key)) map.set(key, [])
+        map.get(key).push(sc)
+      }
+      return Array.from(map, ([label, scenes]) => ({ label, scenes }))
     },
   },
 })

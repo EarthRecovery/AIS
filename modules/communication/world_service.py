@@ -591,10 +591,33 @@ class WorldService:
             world.outline = beats
             world.beat_index = 0
             await self.db.commit()
-            await self.log_event(world_id, "outline_set", f"生成剧本大纲（{len(beats)} 个节拍）",
+            await self.log_event(world_id, "outline_set", f"生成剧本大纲（{len(beats)} 章）",
                                  {"beats": [b.get("title") for b in beats]},
                                  in_world_time=world.in_world_time)
         return beats
+
+    async def update_outline(self, world_id, outline):
+        """用户编辑大纲：覆盖章节列表(每项 {title, goal})。"""
+        world = await self._get(World, world_id)
+        if world is None:
+            return None
+        clean = [{"title": b.get("title", ""), "goal": b.get("goal", "")}
+                 for b in (outline or []) if isinstance(b, dict)]
+        world.outline = clean
+        if world.beat_index >= len(clean):
+            world.beat_index = max(0, len(clean) - 1)
+        await self.db.commit()
+        return clean
+
+    async def prune_snapshots(self, world_id, keep=20):
+        """只保留最近 keep 张快照，避免快照无限堆积。"""
+        ids = (await self.db.execute(
+            select(WorldSnapshot.id).where(WorldSnapshot.world_id == world_id)
+            .order_by(WorldSnapshot.id.desc()))).scalars().all()
+        old = ids[keep:]
+        if old:
+            await self.db.execute(delete(WorldSnapshot).where(WorldSnapshot.id.in_(old)))
+            await self.db.commit()
 
     async def advance_beat(self, world_id):
         world = await self._get(World, world_id)

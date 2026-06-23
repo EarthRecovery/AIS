@@ -107,14 +107,14 @@ class SimulationService:
             return f"第{idx + 1}章 {outline[idx]['title']}"
         return f"第{idx + 1}章"
 
-    async def open_scene(self, world_id, directive: str = ""):
+    async def open_scene(self, world_id, directive: str = "", snapshot: bool = True):
         world = await self._get(World, world_id)
         if world is None:
             return {"error": "世界不存在"}
         chapter = self._chapter_label(world)
-        # 整个世界还没有任何快照（即第一章开篇）→ 先拍一张，作为「回退章节」的起点
-        if not await self.ws.has_snapshot(world_id):
-            await self.ws._snapshot_world(world_id)
+        # 开新幕前拍快照（供「回退场景」）；step_round 已自行拍快照时传 snapshot=False 避免重复
+        if snapshot:
+            await self._snap(world_id)
         ctx, _, _, chars = await self.ws._director_context(world_id)
 
         # 结束当前进行中的场景，并为「下一幕」准备衔接上下文（尾段对话 + 各角色当前位置）
@@ -169,8 +169,8 @@ class SimulationService:
         world = await self._get(World, world_id)
         if world is None:
             return {"error": "世界不存在"}
-        # 拍快照（捕获当前章节进度，回退章节即恢复到此）
-        await self.ws._snapshot_world(world_id)
+        # 拍快照（捕获当前章节进度，回退即恢复到此）
+        await self._snap(world_id)
         # 结束当前场景，章节 +1
         cur = await self._active_scene(world_id)
         if cur:
@@ -180,7 +180,7 @@ class SimulationService:
         chapter = self._chapter_label(world)
         await self.ws.log_event(world_id, "chapter_new", f"进入{chapter}",
                                 {"beat_index": world.beat_index}, in_world_time=chapter)
-        opened = await self.open_scene(world_id, directive)
+        opened = await self.open_scene(world_id, directive, snapshot=False)
         return {"chapter": chapter, "beat_index": world.beat_index, **opened}
 
     async def rollback_chapter(self, world_id):
@@ -249,11 +249,29 @@ class SimulationService:
                 except Exception as e:
                     print(f"consolidate failed for {p.character_id}: {e}")
 
+    async def _recent_transcript(self, world_id, limit_scenes=5):
+        """上下文 = 最近 limit_scenes 个场景的全部对话（含当前场景），按时间顺序。"""
+        scenes = (await self.db.execute(
+            select(Scene).where(Scene.world_id == world_id)
+            .order_by(Scene.id.desc()).limit(limit_scenes))).scalars().all()
+        scenes = list(reversed(scenes))
+        out = []
+        for s in scenes:
+            for m in await self.cs.get_messages(s.id):
+                out.append({"speaker_name": m.speaker_name, "content": m.content})
+        return out
+
+    async def _snap(self, world_id):
+        """推进前拍一张快照（供回退上一步/上一幕），并裁剪到最近若干张。"""
+        await self.ws._snapshot_world(world_id)
+        await self.ws.prune_snapshots(world_id)
+
     async def step_round(self, world_id, directive: str = ""):
-        """跑一轮：每个在场角色各说一次 → 世界裁判结算状态 → 导演判断幕/天是否结束。"""
+        """跑一轮：每个在场角色各说一次 → 世界裁判结算状态 → 导演判断幕是否结束。"""
+        await self._snap(world_id)
         scene = await self._active_scene(world_id)
         if scene is None:
-            await self.open_scene(world_id, directive)
+            await self.open_scene(world_id, directive, snapshot=False)
             scene = await self._active_scene(world_id)
         if scene is None:
             return {"error": "无法开启场景"}
@@ -262,8 +280,7 @@ class SimulationService:
         roster = await self.cs._build_roster(parts)
         round_dialogue = []
         for p in parts:
-            msgs = await self.cs.get_messages(scene.id)
-            transcript = self.cs._build_transcript(msgs)
+            transcript = await self._recent_transcript(world_id)
             line = await self._generate_line(world_id, scene, p, roster, transcript)
             if not line:
                 continue
@@ -275,12 +292,25 @@ class SimulationService:
                 "scene_ended": end_scene, "chapter_done": chapter_done,
                 "active_scene_id": (await self._active_scene(world_id) or scene).id if not end_scene else None}
 
+    async def run_scene(self, world_id, directive: str = "", max_rounds=6):
+        """单独开启对话、跑完一个场景（到裁判判定本幕结束或达上限）。"""
+        if await self._active_scene(world_id) is None:
+            await self.open_scene(world_id, directive)
+        rounds = 0
+        while rounds < max_rounds:
+            res = await self.step_round(world_id, directive)
+            rounds += 1
+            if res.get("error") or res.get("scene_ended"):
+                break
+        return {"success": True, "rounds": rounds}
+
     async def step_round_stream(self, world_id, directive: str = ""):
         """流式版：逐 token 吐出每个角色的发言，最后吐裁判结算。yields 事件 dict。"""
+        await self._snap(world_id)
         scene = await self._active_scene(world_id)
         newly_opened = False
         if scene is None:
-            opened = await self.open_scene(world_id, directive)
+            opened = await self.open_scene(world_id, directive, snapshot=False)
             if opened.get("error"):
                 yield {"type": "error", "message": opened["error"]}
                 return
@@ -299,8 +329,7 @@ class SimulationService:
         roster = await self.cs._build_roster(parts)
         round_dialogue = []
         for p in parts:
-            msgs = await self.cs.get_messages(scene.id)
-            transcript = self.cs._build_transcript(msgs)
+            transcript = await self._recent_transcript(world_id)
             persona, worldview_text, perception = await self._speaker_inputs(world_id, scene, p)
             yield {"type": "speaker", "name": p.role_name, "role_id": p.role_id}
             text = ""
@@ -321,12 +350,28 @@ class SimulationService:
         yield {"type": "done"}
 
     async def _apply_verdict(self, world_id, scene, verdict, by_name):
-        applied = {"memory": 0, "moves": 0, "stat_changes": 0, "items": 0, "relationships": 0, "beliefs": 0}
+        applied = {"memory": 0, "moves": 0, "stat_changes": 0, "items": 0,
+                   "relationships": 0, "beliefs": 0, "mental": 0}
         day = scene.day_label
         for sc in verdict.get("state_changes", []):
             c = by_name.get(sc.get("character", ""))
             if c is None:
                 continue
+            # 情绪/目标/动机/自我摘要 → 更新心智状态
+            mental_data = {k2: sc[k1] for k1, k2 in
+                           (("mood", "mood"), ("goals", "goals"),
+                            ("motivation", "motivation"), ("summary", "self_summary"))
+                           if sc.get(k1)}
+            if mental_data:
+                ms = await self.ws.get_mental(c.id)
+                if ms is None:
+                    from storage.models.mental_state import MentalState
+                    ms = MentalState(character_id=c.id)
+                    self.db.add(ms)
+                for k, v in mental_data.items():
+                    setattr(ms, k, v)
+                await self.db.commit()
+                applied["mental"] += 1
             if sc.get("memory"):
                 await self.ws.add_memory(world_id, c.id, sc["memory"], kind="memory", source_scene_id=scene.id, log=False)
                 applied["memory"] += 1

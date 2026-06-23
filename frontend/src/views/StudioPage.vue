@@ -2,66 +2,86 @@
   <div class="shell">
     <AppNav />
     <div class="body">
-      <!-- 左：世界 + 角色状态 -->
+      <!-- 左：世界 / 大纲 / 章节-场景目录 / 人物 -->
       <div class="sidebar">
-        <div class="section">
-          <div class="section__title"><n-icon><PlanetOutline /></n-icon> 选择世界</div>
-          <n-select
-            :value="store.worldId"
-            :options="worldOptions"
-            placeholder="选择一个世界开始推演"
-            @update:value="store.select"
-          />
-        </div>
+        <n-select
+          :value="store.worldId"
+          :options="worldOptions"
+          placeholder="选择一个世界"
+          @update:value="store.select"
+        />
 
-        <div v-if="store.world" class="section">
-          <div class="section__title"><n-icon><TimeOutline /></n-icon> {{ store.world.in_world_time }}</div>
-        </div>
-
-        <div v-if="store.worldId" class="section">
-          <div class="section__title">
-            <span><n-icon><BookOutline /></n-icon> 剧本大纲</span>
-            <n-button size="tiny" :loading="genning" @click="genOutline">
-              {{ store.outline.length ? '重写' : '生成' }}
-            </n-button>
-          </div>
-          <div v-if="store.outline.length" class="beats">
-            <div v-for="(b, i) in store.outline" :key="i" class="beat"
-              :class="{ 'beat--cur': i === store.beatIndex, 'beat--done': i < store.beatIndex }">
-              <span class="beat__no">{{ i + 1 }}</span>
-              <span class="beat__title">{{ b.title }}</span>
+        <template v-if="store.worldId">
+          <!-- 剧本大纲（可编辑、可折叠） -->
+          <div class="sec">
+            <div class="sec__head" @click="showOutline = !showOutline">
+              <span>{{ showOutline ? '▾' : '▸' }} 剧本大纲</span>
+              <n-button size="tiny" :loading="genning" @click.stop="genOutline">
+                {{ store.outline.length ? '重写' : '生成' }}
+              </n-button>
+            </div>
+            <div v-show="showOutline" class="sec__body">
+              <div v-for="(b, i) in editOutline" :key="i" class="ol">
+                <div class="ol__row">
+                  <span class="ol__no" :class="{ 'ol__no--cur': i === store.beatIndex }">{{ i + 1 }}</span>
+                  <n-input v-model:value="b.title" size="tiny" placeholder="章节名" />
+                  <n-button size="tiny" text @click="removeBeat(i)">✕</n-button>
+                </div>
+                <n-input v-model:value="b.goal" size="tiny" type="textarea" :autosize="{ minRows: 1, maxRows: 3 }" placeholder="本章目标/大纲" />
+              </div>
+              <div class="ol__actions">
+                <n-button size="tiny" @click="addBeat">+ 章</n-button>
+                <n-button size="tiny" type="primary" @click="saveOutline">保存大纲</n-button>
+              </div>
+              <div v-if="!editOutline.length" class="hint">点「生成」让编剧写主线，或「+ 章」手动加</div>
             </div>
           </div>
-          <div v-else class="hint">点「生成」让编剧写一条主线，推演不跑偏</div>
-        </div>
 
-        <div class="section section--chars" v-if="store.worldId">
-          <div class="section__title"><n-icon><PeopleOutline /></n-icon> 角色状态</div>
-          <n-scrollbar style="flex:1; min-height:0">
-            <div v-for="c in store.characters" :key="c.id" class="char" @click="store.openChar(c.id)">
-              <div class="char__head">
-                <span class="avatar" :style="{ background: color(c.id) }">{{ first(c.name) }}</span>
-                <span class="char__name">{{ c.name }}</span>
-                <span class="char__loc">{{ c.location || '未知' }}</span>
-              </div>
-              <div class="stats">
-                <div v-for="(v, k) in c.stats" :key="k" class="stat">
-                  <span class="stat__k">{{ statLabel(k) }}</span>
-                  <div class="bar"><div class="bar__fill" :style="barStyle(k, v)"></div></div>
-                  <span class="stat__v">{{ v }}</span>
+          <!-- 章节 → 场景 两层目录 -->
+          <div class="sec sec--tree">
+            <div class="sec__title">章节 / 场景</div>
+            <n-scrollbar style="flex:1; min-height:0">
+              <div v-for="ch in store.chapters" :key="ch.label" class="ch">
+                <div class="ch__head" @click="toggleCh(ch.label)">
+                  <span>{{ expanded.has(ch.label) ? '▾' : '▸' }}</span>
+                  <span class="ch__name">{{ ch.label }}</span>
+                  <span class="ch__cnt">{{ ch.scenes.length }}</span>
+                </div>
+                <div v-show="expanded.has(ch.label)" class="ch__scenes">
+                  <div v-for="s in ch.scenes" :key="s.id" class="sc"
+                    :class="{ 'sc--active': s.id === store.activeSceneId }"
+                    @click="focusScene(s.id)">
+                    <span class="sc__dot" :class="s.status === 'active' ? 'sc__dot--on' : ''"></span>
+                    {{ s.name }}
+                  </div>
                 </div>
               </div>
+              <div v-if="!store.scenes.length" class="hint">还没有场景，点「下一轮」开始</div>
+            </n-scrollbar>
+          </div>
+
+          <!-- 人物 二级菜单（可折叠，点人物看/改细节） -->
+          <div class="sec">
+            <div class="sec__head" @click="showChars = !showChars">
+              <span>{{ showChars ? '▾' : '▸' }} 人物（{{ store.characters.length }}）</span>
             </div>
-            <div v-if="!store.characters.length" class="hint">还没有角色</div>
-          </n-scrollbar>
-        </div>
+            <div v-show="showChars" class="sec__body chars">
+              <div v-for="c in store.characters" :key="c.id" class="char" @click="store.openChar(c.id)">
+                <span class="avatar avatar--sm" :style="{ background: color(c.id) }">{{ first(c.name) }}</span>
+                <span class="char__name">{{ c.name }}</span>
+                <span class="char__loc">{{ c.location || '—' }}</span>
+              </div>
+              <div v-if="!store.characters.length" class="hint">还没有角色</div>
+            </div>
+          </div>
+        </template>
       </div>
 
       <!-- 右：场景对话 + 控制 -->
       <div class="main">
         <template v-if="store.worldId">
           <n-scrollbar class="stage" ref="stageRef">
-            <div v-for="s in store.scenes" :key="s.id" class="scene"
+            <div v-for="s in store.scenes" :key="s.id" :id="'sc-' + s.id" class="scene"
               :class="{ 'scene--active': s.id === store.activeSceneId }">
               <div class="scene__head">
                 <span class="scene__day">{{ s.day_label }}</span>
@@ -98,17 +118,17 @@
               <n-button :loading="store.busy" :disabled="store.busy" @click="step">
                 <template #icon><n-icon><PlayOutline /></n-icon></template>下一轮
               </n-button>
-              <n-button :loading="store.busy" :disabled="store.busy" @click="nextScene">
-                <template #icon><n-icon><PlayForwardOutline /></n-icon></template>下一幕
+              <n-button :loading="store.busy" :disabled="store.busy" @click="runScene">
+                <template #icon><n-icon><PlayForwardOutline /></n-icon></template>完成本场景
+              </n-button>
+              <n-button :loading="store.busy" :disabled="store.busy" @click="runChapter">
+                <template #icon><n-icon><FlashOutline /></n-icon></template>完成本章
               </n-button>
               <n-button type="primary" :loading="store.busy" :disabled="store.busy" @click="newChapter">
                 <template #icon><n-icon><BookOutline /></n-icon></template>新建章节
               </n-button>
-              <n-button :loading="store.busy" :disabled="store.busy" @click="runChapter">
-                <template #icon><n-icon><FlashOutline /></n-icon></template>自动跑本章
-              </n-button>
               <n-button :disabled="!store.canRollback || store.busy" @click="rollback">
-                <template #icon><n-icon><ArrowUndoOutline /></n-icon></template>回退章节
+                <template #icon><n-icon><ArrowUndoOutline /></n-icon></template>回退
               </n-button>
             </div>
           </div>
@@ -121,22 +141,28 @@
       </div>
     </div>
 
-    <!-- 角色详情 -->
-    <n-drawer v-model:show="store.showChar" :width="420" placement="right">
+    <!-- 角色详情（可编辑） -->
+    <n-drawer v-model:show="store.showChar" :width="430" placement="right">
       <n-drawer-content v-if="store.charDetail" :title="store.charDetail.name" closable>
         <div class="cd">
-          <div class="cd__row"><b>状态</b><span>{{ store.charDetail.status }} · {{ store.charDetail.location || '位置未知' }}</span></div>
-          <div class="cd__stats">
-            <span v-for="(v, k) in store.charDetail.stats" :key="k" class="cd__stat">{{ statLabel(k) }} {{ v }}</span>
+          <div class="cd__sec">
+            <div class="cd__h">基本</div>
+            <div class="cd__form">
+              <label>状态</label><n-input v-model:value="edit.status" size="small" />
+            </div>
+            <div v-for="(v, k) in edit.stats" :key="k" class="cd__form">
+              <label>{{ statLabel(k) }}</label><n-input-number v-model:value="edit.stats[k]" size="small" :min="0" />
+            </div>
+            <n-button size="small" type="primary" @click="saveBasic">保存基本</n-button>
           </div>
 
-          <div v-if="cdMental" class="cd__sec">
-            <div class="cd__h">长期自我认知</div>
-            <div class="cd__body">{{ cdMental.self_summary || '（暂无）' }}</div>
-            <div v-if="cdMental.mood || cdMental.goals" class="cd__sub">
-              <span v-if="cdMental.mood">心情：{{ cdMental.mood }}　</span>
-              <span v-if="cdMental.goals">目标：{{ cdMental.goals }}</span>
-            </div>
+          <div class="cd__sec">
+            <div class="cd__h">心智（情绪/目标/动机/自我认知）</div>
+            <div class="cd__form"><label>情绪</label><n-input v-model:value="edit.mood" size="small" /></div>
+            <div class="cd__form"><label>目标</label><n-input v-model:value="edit.goals" size="small" type="textarea" :autosize="{ minRows: 1, maxRows: 3 }" /></div>
+            <div class="cd__form"><label>动机</label><n-input v-model:value="edit.motivation" size="small" type="textarea" :autosize="{ minRows: 1, maxRows: 3 }" /></div>
+            <div class="cd__form"><label>自我认知</label><n-input v-model:value="edit.self_summary" size="small" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" /></div>
+            <n-button size="small" type="primary" @click="saveMental">保存心智</n-button>
           </div>
 
           <div class="cd__sec">
@@ -146,27 +172,23 @@
             </div>
             <div v-else class="cd__empty">（暂无）</div>
           </div>
-
           <div class="cd__sec">
-            <div class="cd__h">短期记忆（最近几个章节）</div>
+            <div class="cd__h">短期记忆（最近 5 个场景）</div>
             <div v-if="store.charDetail.short_term.length" class="cd__mems">
               <div v-for="(m, i) in store.charDetail.short_term" :key="i" class="cd__mem">· {{ m.content }}</div>
             </div>
             <div v-else class="cd__empty">（暂无）</div>
           </div>
-
           <div class="cd__sec" v-if="store.charDetail.relationships.length">
             <div class="cd__h">关系</div>
             <div v-for="(r, i) in store.charDetail.relationships" :key="i" class="cd__rel">
               → {{ r.to }}：{{ r.relation_type }}（好感 {{ r.affinity }}）
             </div>
           </div>
-
           <div class="cd__sec" v-if="store.charDetail.items.length">
             <div class="cd__h">物品</div>
             <span v-for="(it, i) in store.charDetail.items" :key="i" class="cd__item">{{ it.name }}</span>
           </div>
-
           <div class="cd__sec" v-if="store.charDetail.abilities.length">
             <div class="cd__h">能力</div>
             <span v-for="(a, i) in store.charDetail.abilities" :key="i" class="cd__item">{{ a.name }} lv{{ a.level }}</span>
@@ -178,11 +200,14 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch, nextTick } from 'vue'
-import { NSelect, NScrollbar, NButton, NInput, NIcon, NTag, NDrawer, NDrawerContent, useMessage } from 'naive-ui'
+import { computed, onMounted, reactive, ref, watch, nextTick } from 'vue'
 import {
-  PlanetOutline, TimeOutline, PeopleOutline, PlayOutline,
-  PlayForwardOutline, FlashOutline, ArrowUndoOutline, BookOutline,
+  NSelect, NScrollbar, NButton, NInput, NInputNumber, NIcon, NTag,
+  NDrawer, NDrawerContent, useMessage,
+} from 'naive-ui'
+import {
+  PlanetOutline, PlayOutline, PlayForwardOutline, FlashOutline,
+  ArrowUndoOutline, BookOutline,
 } from '@vicons/ionicons5'
 import { useStudioStore } from '@/store/Studio'
 import AppNav from '@/components/AppNav.vue'
@@ -193,22 +218,57 @@ const directive = ref('')
 const stageRef = ref(null)
 const genning = ref(false)
 
+const showOutline = ref(true)
+const showChars = ref(true)
+const expanded = reactive(new Set())
+const toggleCh = (label) => { expanded.has(label) ? expanded.delete(label) : expanded.add(label) }
+
+// 大纲编辑副本
+const editOutline = ref([])
+watch(() => store.outline, (o) => { editOutline.value = (o || []).map((b) => ({ ...b })) }, { immediate: true, deep: true })
+// 章节默认全展开
+watch(() => store.chapters, (chs) => { chs.forEach((c) => expanded.add(c.label)) }, { immediate: true })
+
+const addBeat = () => editOutline.value.push({ title: '新章节', goal: '' })
+const removeBeat = (i) => editOutline.value.splice(i, 1)
+const saveOutline = async () => {
+  try { await store.saveOutline(editOutline.value); message.success('大纲已保存') }
+  catch (e) { message.error('保存失败') }
+}
 const genOutline = async () => {
   if (genning.value) return
   genning.value = true
+  try { await store.generateOutline(directive.value); message.success('大纲已生成') }
+  catch (e) { message.error('生成失败') }
+  finally { genning.value = false }
+}
+
+// 角色编辑副本
+const edit = reactive({ status: '', stats: {}, mood: '', goals: '', motivation: '', self_summary: '' })
+watch(() => store.charDetail, (d) => {
+  if (!d) return
+  edit.status = d.status || ''
+  edit.stats = { ...(d.stats || {}) }
+  const m = d.mental || {}
+  edit.mood = m.mood || ''
+  edit.goals = m.goals || ''
+  edit.motivation = m.motivation || ''
+  edit.self_summary = m.self_summary || ''
+})
+const saveBasic = async () => {
+  try { await store.saveCharBasic(store.charDetail.id, { status: edit.status, stats: edit.stats }); message.success('已保存') }
+  catch (e) { message.error('保存失败') }
+}
+const saveMental = async () => {
   try {
-    await store.generateOutline(directive.value)
-    message.success('剧本大纲已生成')
-  } catch (e) {
-    console.error('gen outline failed', e)
-    message.error('生成大纲失败，请重试')
-  } finally {
-    genning.value = false
-  }
+    await store.saveCharMental(store.charDetail.id, {
+      mood: edit.mood, goals: edit.goals, motivation: edit.motivation, self_summary: edit.self_summary,
+    })
+    message.success('已保存')
+  } catch (e) { message.error('保存失败') }
 }
 
 const worldOptions = computed(() => store.worlds.map((w) => ({ label: w.name, value: w.id })))
-const cdMental = computed(() => store.charDetail?.mental)
 
 const PALETTE = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#db2777', '#0891b2', '#65a30d']
 const color = (id) => PALETTE[Math.abs(Number(id) || 0) % PALETTE.length]
@@ -219,67 +279,47 @@ const nameColor = (name) => {
 }
 const first = (n) => (n || '?').trim().charAt(0)
 const statLabel = (k) => ({ hp: '生命', mp: '法力', stamina: '体力' }[k] || k)
-const STAT_COLOR = { hp: '#dc2626', mp: '#2563eb', stamina: '#059669' }
-const barStyle = (k, v) => ({
-  width: `${Math.max(0, Math.min(100, Number(v) || 0))}%`,
-  background: STAT_COLOR[k] || '#6366f1',
-})
 
 const scrollBottom = () => nextTick(() => stageRef.value?.scrollTo({ position: 'bottom' }))
+const focusScene = (id) => {
+  const el = document.getElementById('sc-' + id)
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 watch(() => store.scenes.map((s) => s.messages.length).join(','), scrollBottom)
 
 const step = async () => {
   try {
     const dir = directive.value
     directive.value = ''
-    // 流式：边生成边冒出；每隔一会儿滚到底
     const timer = setInterval(scrollBottom, 300)
-    try {
-      await store.stepStream(dir)
-    } finally {
-      clearInterval(timer)
-    }
+    try { await store.stepStream(dir) } finally { clearInterval(timer) }
     scrollBottom()
-  } catch (e) {
-    console.error('step failed', e)
-    message.error('推演失败，请重试')
-  }
+  } catch (e) { message.error('推演失败，请重试') }
 }
-const nextScene = async () => {
+const runScene = async () => {
   try {
-    const r = await store.openScene(directive.value)
-    if (r?.data?.error) message.error(r.data.error)
-    directive.value = ''
-  } catch (e) {
-    console.error('open scene failed', e)
-    message.error(e?.code === 'ECONNABORTED' ? '开场景超时，请重试' : '开场景失败，请重试')
-  }
-}
-const newChapter = async () => {
-  try {
-    const r = await store.newChapter(directive.value)
-    directive.value = ''
-    if (r?.data?.chapter) message.success(`进入${r.data.chapter}`)
+    const r = await store.runScene(directive.value); directive.value = ''
+    if (r?.data?.success) message.success(`本场景跑了 ${r.data.rounds} 轮`)
     scrollBottom()
-  } catch (e) {
-    console.error('new chapter failed', e)
-    message.error('新建章节失败，请重试')
-  }
+  } catch (e) { message.error(e?.code === 'ECONNABORTED' ? '超时，请重试' : '失败，请重试') }
 }
 const runChapter = async () => {
   try {
-    const r = await store.runChapter(directive.value)
-    directive.value = ''
+    const r = await store.runChapter(directive.value); directive.value = ''
     if (r?.data?.success) message.success(`本章推完：${r.data.scenes} 幕 / ${r.data.rounds} 轮`)
     scrollBottom()
-  } catch (e) {
-    console.error('run chapter failed', e)
-    message.error(e?.code === 'ECONNABORTED' ? '自动推演超时，请重试或改用「下一轮」' : '自动推演失败，请重试')
-  }
+  } catch (e) { message.error(e?.code === 'ECONNABORTED' ? '超时，请重试' : '失败，请重试') }
+}
+const newChapter = async () => {
+  try {
+    const r = await store.newChapter(directive.value); directive.value = ''
+    if (r?.data?.chapter) message.success(`进入${r.data.chapter}`)
+    scrollBottom()
+  } catch (e) { message.error('新建章节失败') }
 }
 const rollback = async () => {
   const r = await store.rollback()
-  if (r?.data?.success) message.success(`已回退到「${r.data.restored_to || '上一天'}」`)
+  if (r?.data?.success) message.success('已回退一步')
   else message.error(r?.data?.error || '没有可回退的快照')
 }
 
@@ -291,34 +331,43 @@ onMounted(() => store.fetchWorlds())
 .body { flex: 1; display: flex; min-height: 0; }
 
 .sidebar { flex: 0 0 280px; background: var(--c-sidebar); color: var(--c-sidebar-text);
-  padding: 16px 14px; display: flex; flex-direction: column; gap: 16px; min-height: 0; }
-.section { display: flex; flex-direction: column; gap: 8px; }
-.section--chars { flex: 1 1 auto; min-height: 0; }
-.section__title { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; }
-.char { background: var(--c-sidebar-soft); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; cursor: pointer; transition: background 0.15s; }
-.char:hover { background: #3a4255; }
-.char__head { display: flex; align-items: center; gap: 8px; }
-.char__name { font-size: 14px; font-weight: 600; flex: 1; }
-.char__loc { font-size: 11px; color: #9aa4b8; }
-.stats { margin-top: 8px; display: flex; flex-direction: column; gap: 5px; }
-.stat { display: flex; align-items: center; gap: 6px; font-size: 11px; }
-.stat__k { width: 28px; color: #cbd5e1; }
-.stat__v { width: 26px; text-align: right; color: #e5e7eb; }
-.bar { flex: 1; height: 6px; background: rgba(255,255,255,0.12); border-radius: 4px; overflow: hidden; }
-.bar__fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+  padding: 14px 12px; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.sec { display: flex; flex-direction: column; gap: 8px; }
+.sec--tree { flex: 1 1 auto; min-height: 0; }
+.sec__head { display: flex; align-items: center; justify-content: space-between; font-weight: 600;
+  font-size: 14px; cursor: pointer; }
+.sec__title { font-weight: 600; font-size: 14px; }
+.sec__body { display: flex; flex-direction: column; gap: 8px; }
 .hint { color: #94a3b8; font-size: 12px; }
-.section__title { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.beats { display: flex; flex-direction: column; gap: 4px; }
-.beat { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #9aa4b8;
-  padding: 4px 8px; border-radius: 8px; }
-.beat__no { width: 18px; height: 18px; border-radius: 50%; background: rgba(255,255,255,0.1);
+
+/* 大纲编辑 */
+.ol { background: var(--c-sidebar-soft); border-radius: 8px; padding: 7px 8px; display: flex; flex-direction: column; gap: 5px; }
+.ol__row { display: flex; align-items: center; gap: 6px; }
+.ol__no { width: 18px; height: 18px; border-radius: 50%; background: rgba(255,255,255,0.12); color: #cbd5e1;
   display: flex; align-items: center; justify-content: center; font-size: 11px; flex: 0 0 auto; }
-.beat__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.beat--cur { background: var(--c-primary); color: #fff; }
-.beat--cur .beat__no { background: rgba(255,255,255,0.25); }
-.beat--done { color: #6b7280; text-decoration: line-through; }
-.scene__collapsed { color: var(--c-primary); font-size: 13px; cursor: pointer; padding: 6px 0; }
-.scene__collapsed:hover { text-decoration: underline; }
+.ol__no--cur { background: var(--c-primary); color: #fff; }
+.ol__actions { display: flex; gap: 8px; }
+
+/* 章节-场景树 */
+.ch { margin-bottom: 4px; }
+.ch__head { display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 5px 4px;
+  font-size: 13px; font-weight: 600; }
+.ch__name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch__cnt { font-size: 11px; color: #9aa4b8; }
+.ch__scenes { display: flex; flex-direction: column; }
+.sc { display: flex; align-items: center; gap: 6px; padding: 4px 4px 4px 22px; font-size: 12px;
+  color: #cbd5e1; cursor: pointer; border-radius: 6px; }
+.sc:hover { background: rgba(255,255,255,0.06); }
+.sc--active { color: #fff; background: rgba(99,102,241,0.3); }
+.sc__dot { width: 6px; height: 6px; border-radius: 50%; background: #6b7280; flex: 0 0 auto; }
+.sc__dot--on { background: #22c55e; }
+
+/* 人物菜单 */
+.chars { max-height: 220px; overflow-y: auto; }
+.char { display: flex; align-items: center; gap: 8px; padding: 6px 6px; border-radius: 8px; cursor: pointer; }
+.char:hover { background: var(--c-sidebar-soft); }
+.char__name { flex: 1; font-size: 13px; }
+.char__loc { font-size: 11px; color: #9aa4b8; }
 
 .main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; background: var(--c-bg); }
 .stage { flex: 1; min-height: 0; padding: 20px 28px; }
@@ -328,11 +377,13 @@ onMounted(() => store.fetchWorlds())
 .scene__day { font-size: 12px; color: var(--c-primary); background: var(--c-primary-soft); padding: 2px 8px; border-radius: 999px; }
 .scene__name { font-weight: 700; color: var(--c-text); }
 .scene__setting { margin: 8px 0; font-size: 13px; color: var(--c-text-soft); }
+.scene__collapsed { color: var(--c-primary); font-size: 13px; cursor: pointer; padding: 6px 0; }
+.scene__collapsed:hover { text-decoration: underline; }
 .dialogue { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
 .line { display: flex; gap: 8px; align-items: flex-start; }
 .avatar { width: 30px; height: 30px; border-radius: 50%; color: #fff; font-weight: 700; font-size: 13px;
   display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
-.avatar--sm { width: 28px; height: 28px; font-size: 12px; margin-top: 2px; }
+.avatar--sm { width: 26px; height: 26px; font-size: 12px; }
 .line__name { font-size: 12px; font-weight: 700; color: #475569; margin-bottom: 2px; }
 .line__content { white-space: pre-wrap; word-break: break-word; line-height: 1.6; color: #0f172a; }
 .empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -348,13 +399,12 @@ onMounted(() => store.fetchWorlds())
 
 /* 角色详情抽屉 */
 .cd { display: flex; flex-direction: column; gap: 14px; }
-.cd__row { display: flex; justify-content: space-between; font-size: 13px; color: #475569; }
-.cd__stats { display: flex; flex-wrap: wrap; gap: 6px; }
-.cd__stat { font-size: 12px; background: #eef2ff; color: #4f46e5; border-radius: 999px; padding: 2px 10px; }
 .cd__sec { border-top: 1px solid #eef1f5; padding-top: 10px; }
-.cd__h { font-size: 13px; font-weight: 700; color: #1e293b; margin-bottom: 6px; }
-.cd__body { font-size: 13px; line-height: 1.6; color: #334155; white-space: pre-wrap; }
-.cd__sub { font-size: 12px; color: #64748b; margin-top: 6px; }
+.cd__sec:first-child { border-top: none; padding-top: 0; }
+.cd__h { font-size: 13px; font-weight: 700; color: #1e293b; margin-bottom: 8px; }
+.cd__form { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
+.cd__form label { width: 56px; font-size: 12px; color: #64748b; padding-top: 4px; flex: 0 0 auto; }
+.cd__form :deep(.n-input), .cd__form :deep(.n-input-number) { flex: 1; }
 .cd__mems { display: flex; flex-direction: column; gap: 4px; }
 .cd__mem { font-size: 13px; line-height: 1.5; color: #334155; }
 .cd__empty { font-size: 12px; color: #94a3b8; }

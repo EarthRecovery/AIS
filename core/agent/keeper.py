@@ -265,16 +265,18 @@ class KeeperAgent:
         beat_block = (f"【当前剧本节拍】{beat.get('title','')}：{beat.get('goal','')}\n" if beat else "")
         sys = SystemMessage(content=(
             "你是持久世界的「世界裁判」。根据这一轮刚发生的对话，结算每个在场角色的状态变化，"
-            "要符合剧情因果、变化适度。可改：记忆、所在地点、获得/失去物品、数值(如 hp/mp/stamina 的增减)、"
-            "彼此关系、主观认知。并判断这一幕是否该结束、今天是否该结束、当前剧本节拍是否已达成。\n"
+            "要符合剧情因果、变化适度。每个角色可更新：记忆、所在地点、获得/失去物品、"
+            "数值(如 hp/mp/stamina 的增减)、情绪(mood)、当前目标(goals)、动机(motivation)、"
+            "自我摘要(summary)、彼此关系、主观认知。并判断这一幕是否该结束、当前章节是否已达成。\n"
             "只输出 JSON：\n"
             '{"state_changes":[{"character":"名","memory":"新记住的(可选)","location":"新地点名(可选)",'
             '"stat_deltas":{"hp":-10,"mp":-5}(可选,增减量),"items_gained":["物品"],"items_lost":["物品"],'
-            '"belief":"新认知(可选)"}],'
+            '"mood":"新情绪(可选)","goals":"新目标(可选)","motivation":"新动机(可选)",'
+            '"summary":"自我摘要的更新(可选,一两句)","belief":"新认知(可选)"}],'
             '"relationship_changes":[{"from":"名","to":"名","relation_type":"...","affinity":-100..100,"reason":"..."}],'
             '"scene":{"should_end":false,"should_end_day":false,"beat_done":false,"reason":"..."}}\n'
             "任何数组/字段都可省略或为空。stat_deltas 是增减量(负数表示减少)。"
-            "beat_done 表示当前剧本节拍的目标是否已在剧情中达成。"
+            "只在剧情确实造成变化时才给对应字段；beat_done 表示当前章节目标是否已达成。"
         ))
         human = HumanMessage(content=(
             f"{beat_block}【场景情境】{scene_setting or ''}\n【在场角色当前状态】\n{cs_lines}\n\n"
