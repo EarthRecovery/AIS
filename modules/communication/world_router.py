@@ -18,7 +18,8 @@ def s_world(w):
 
 def s_worldview(wv):
     return None if wv is None else {
-        "id": wv.id, "name": wv.name, "description": wv.description, "rules": wv.rules}
+        "id": wv.id, "name": wv.name, "description": wv.description, "rules": wv.rules,
+        "background": wv.background}
 
 def s_char(c):
     return {"id": c.id, "name": c.name, "role_id": c.role_id, "status": c.status,
@@ -81,6 +82,7 @@ class WorldviewUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     rules: str | None = None
+    background: str | None = None
     world_id: int | None = None
 
 class CharacterCreate(BaseModel):

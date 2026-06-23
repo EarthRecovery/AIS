@@ -15,6 +15,7 @@ class WorldviewRequest(BaseModel):
     name: str
     description: str | None = None
     rules: str | None = None
+    background: str | None = None
 
 
 class RoomRequest(BaseModel):
@@ -57,7 +58,8 @@ async def create_worldview(
     svc: CommunicationService = Depends(),
     user_id: str = Depends(get_request_user_id),
 ):
-    wv = await svc.create_worldview(user_id, req.name, req.description or "", req.rules or "")
+    wv = await svc.create_worldview(user_id, req.name, req.description or "", req.rules or "",
+                                    req.background or "")
     return {"id": wv.id, "name": wv.name}
 
 
@@ -68,7 +70,8 @@ async def list_worldviews(
     items = await svc.list_worldviews(user_id)
     return {
         "worldviews": [
-            {"id": w.id, "name": w.name, "description": w.description, "rules": w.rules}
+            {"id": w.id, "name": w.name, "description": w.description, "rules": w.rules,
+             "background": w.background}
             for w in items
         ]
     }

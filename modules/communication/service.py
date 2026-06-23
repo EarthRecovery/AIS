@@ -36,8 +36,10 @@ class CommunicationService:
         self.db = db
 
     # ---------------- 世界观 ----------------
-    async def create_worldview(self, user_id: int, name: str, description: str, rules: str) -> Worldview:
-        wv = Worldview(user_id=user_id, name=name, description=description, rules=rules)
+    async def create_worldview(self, user_id: int, name: str, description: str, rules: str,
+                               background: str = "") -> Worldview:
+        wv = Worldview(user_id=user_id, name=name, description=description, rules=rules,
+                       background=background)
         self.db.add(wv)
         await self.db.commit()
         await self.db.refresh(wv)
