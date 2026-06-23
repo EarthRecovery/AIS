@@ -1,0 +1,34 @@
+/* 全局设计令牌：统一配色 / 圆角 / 阴影 / 间距，让三块界面风格一致 */
+:root {
+  --c-primary: #4f46e5;
+  --c-primary-soft: #eef2ff;
+  --c-bg: #f1f5f9;
+  --c-panel: #ffffff;
+  --c-sidebar: #1f2433;
+  --c-sidebar-soft: #2d3344;
+  --c-sidebar-text: #cbd5e1;
+  --c-text: #1e293b;
+  --c-text-soft: #64748b;
+  --c-text-faint: #94a3b8;
+  --c-border: #e5e7eb;
+
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 6px 20px rgba(15, 23, 42, 0.08);
+
+  --nav-h: 54px;
+}
+
+html, body, #app {
+  margin: 0;
+  height: 100%;
+  background: var(--c-bg);
+}
+
+/* 统一滚动条观感 */
+* { scrollbar-width: thin; }
+
+/* 通用工具类 */
+.u-faint { color: var(--c-text-faint); }
+.u-soft { color: var(--c-text-soft); }

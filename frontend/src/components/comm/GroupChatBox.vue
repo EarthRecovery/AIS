@@ -9,13 +9,18 @@
         <div v-if="kind(m) === 'narrator'" class="narrator">
           {{ m.content }}
         </div>
-        <n-card v-else size="small" embedded class="bubble" :class="`bubble--${kind(m)}`"
-          :style="kind(m) === 'persona' ? { borderLeft: `4px solid ${color(m.speaker_role_id)}` } : null">
-          <div class="bubble__name" :style="{ color: kind(m) === 'persona' ? color(m.speaker_role_id) : '#475569' }">
-            {{ m.speaker_name }}
+        <template v-else>
+          <!-- persona 头像在左 -->
+          <div v-if="kind(m) === 'persona'" class="avatar" :style="{ background: color(m.speaker_role_id) }">
+            {{ firstChar(m.speaker_name) }}
           </div>
-          <div class="bubble__content">{{ m.content }}<span v-if="streaming && index === messages.length - 1" class="caret">▋</span></div>
-        </n-card>
+          <n-card size="small" embedded class="bubble" :class="`bubble--${kind(m)}`">
+            <div class="bubble__name" :style="{ color: kind(m) === 'persona' ? color(m.speaker_role_id) : '#475569' }">
+              {{ m.speaker_name }}
+            </div>
+            <div class="bubble__content">{{ m.content }}<span v-if="streaming && index === messages.length - 1" class="caret">▋</span></div>
+          </n-card>
+        </template>
       </div>
       <div v-if="messages.length === 0" class="empty">
         还没有人发言。说点什么，或点「推进剧情」让角色们自己开场～
@@ -43,6 +48,7 @@ const kind = (m) => {
 
 const PALETTE = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#db2777', '#0891b2', '#65a30d']
 const color = (roleId) => PALETTE[Math.abs(Number(roleId) || 0) % PALETTE.length]
+const firstChar = (name) => (name || '?').trim().charAt(0)
 
 const scrollToBottom = () => {
   nextTick(() => scrollRef.value?.scrollTo({ position: 'bottom' }))
@@ -66,10 +72,16 @@ watch(() => props.messages.map((m) => m.content).join('|'), scrollToBottom)
   display: flex; height: 100%; align-items: center; justify-content: center;
   color: #94a3b8; font-size: 14px; text-align: center;
 }
-.row { display: flex; margin-bottom: 12px; }
+.row { display: flex; margin-bottom: 14px; gap: 8px; align-items: flex-start; }
 .row--user { justify-content: flex-end; }
 .row--persona { justify-content: flex-start; }
 .row--narrator { justify-content: center; }
+.avatar {
+  flex: 0 0 auto; width: 32px; height: 32px; border-radius: 50%;
+  color: #fff; font-size: 14px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.15); margin-top: 2px;
+}
 .narrator {
   font-size: 13px; color: #64748b; background: #eef2f6;
   padding: 6px 14px; border-radius: 12px;
