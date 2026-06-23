@@ -4,6 +4,7 @@ import MainPage from '@/views/MainPage.vue'
 import AuthView from '@/views/AuthView.vue'
 import CommunicationPage from '@/views/CommunicationPage.vue'
 import WorldManagePage from '@/views/WorldManagePage.vue'
+import StudioPage from '@/views/StudioPage.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -13,6 +14,7 @@ const router = createRouter({
     { path: '/app', name: 'app', component: MainPage, meta: { requiresAuth: true } },
     { path: '/communication', name: 'communication', component: CommunicationPage, meta: { requiresAuth: true } },
     { path: '/world', name: 'world', component: WorldManagePage, meta: { requiresAuth: true } },
+    { path: '/studio', name: 'studio', component: StudioPage, meta: { requiresAuth: true } },
     { path: '/:pathMatch(.*)*', redirect: '/login' },
   ],
 })

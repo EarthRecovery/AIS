@@ -28,6 +28,8 @@ class Scene(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     # 上一幕场景(由 Keeper 切换时记录因果链)
     prev_scene_id: Mapped[int] = mapped_column(Integer, nullable=True)
+    # 该场景所属的世界内"天"(用于演播室按天分组/回放)
+    day_label: Mapped[str] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

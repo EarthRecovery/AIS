@@ -124,8 +124,11 @@ class WorldService:
         return wv
 
     # ============ Character ============
-    async def create_character(self, world_id, name, role_id=None, status=None) -> Character:
-        c = Character(world_id=world_id, name=name, role_id=role_id, status=status or "active")
+    DEFAULT_STATS = {"hp": 100, "mp": 100, "stamina": 100}
+
+    async def create_character(self, world_id, name, role_id=None, status=None, stats=None) -> Character:
+        c = Character(world_id=world_id, name=name, role_id=role_id, status=status or "active",
+                      stats=dict(stats) if stats else dict(self.DEFAULT_STATS))
         return await self._save(c)
 
     async def update_character(self, char_id, data: dict):
@@ -513,7 +516,7 @@ class WorldService:
 
     # 各表参与快照的字段（不含时间戳，回退时让其重置）
     _SNAP_FIELDS = {
-        "character": ["id", "world_id", "role_id", "name", "status", "current_location_id"],
+        "character": ["id", "world_id", "role_id", "name", "status", "current_location_id", "stats"],
         "mental_state": ["id", "character_id", "mood", "goals", "motivation", "self_summary"],
         "agent_memory": ["id", "world_id", "character_id", "kind", "content", "subject_type",
                          "subject_id", "confidence", "is_true", "source_scene_id", "importance"],
@@ -524,7 +527,9 @@ class WorldService:
         "ability": ["id", "character_id", "name", "description", "level"],
         "common_knowledge": ["id", "world_id", "content"],
         "scene": ["id", "user_id", "world_id", "worldview_id", "name", "scenario", "summary",
-                  "status", "prev_scene_id"],
+                  "status", "prev_scene_id", "day_label"],
+        "scene_participant": ["id", "scene_id", "role_id", "character_id", "role_name", "display_order"],
+        "scene_message": ["id", "scene_id", "speaker_type", "speaker_role_id", "speaker_name", "content"],
     }
 
     async def _snapshot_world(self, world_id):
@@ -566,6 +571,18 @@ class WorldService:
             "scenes": await rows(Scene, "scene", world_id=world_id),
             "events_max_id": int(max_event),
         }
+        # 场景对话（参与者 + 消息）按本世界的场景集合捕获
+        scene_ids = [s["id"] for s in state["scenes"]]
+        sp, sm = [], []
+        if scene_ids:
+            sp_objs = (await self.db.execute(
+                select(SceneParticipant).where(SceneParticipant.scene_id.in_(scene_ids)))).scalars().all()
+            sp = [self._row(o, self._SNAP_FIELDS["scene_participant"]) for o in sp_objs]
+            sm_objs = (await self.db.execute(
+                select(SceneMessage).where(SceneMessage.scene_id.in_(scene_ids)))).scalars().all()
+            sm = [self._row(o, self._SNAP_FIELDS["scene_message"]) for o in sm_objs]
+        state["scene_participants"] = sp
+        state["scene_messages"] = sm
         snap = WorldSnapshot(world_id=world_id, day_label=world.in_world_time, state=state)
         return await self._save(snap)
 
@@ -584,12 +601,17 @@ class WorldService:
             return {"success": False, "error": "没有可回退的快照"}
         st = snap.state or {}
 
-        # 1) 删除该世界的所有子表行（mental/ability 先按当前角色删）
+        # 1) 删除该世界的所有子表行（mental/ability/场景对话 先按当前关联删）
         chars_now = await self._all(Character, world_id=world_id)
         cids = [c.id for c in chars_now]
         if cids:
             await self.db.execute(delete(MentalState).where(MentalState.character_id.in_(cids)))
             await self.db.execute(delete(Ability).where(Ability.character_id.in_(cids)))
+        scenes_now = await self._all(Scene, world_id=world_id)
+        sids = [s.id for s in scenes_now]
+        if sids:
+            await self.db.execute(delete(SceneParticipant).where(SceneParticipant.scene_id.in_(sids)))
+            await self.db.execute(delete(SceneMessage).where(SceneMessage.scene_id.in_(sids)))
         for model in (AgentMemory, Relationship, Item, Location, CommonKnowledge, Scene, Character):
             await self.db.execute(delete(model).where(model.world_id == world_id))
 
@@ -606,6 +628,8 @@ class WorldService:
         mk(Location, st.get("locations"))
         mk(CommonKnowledge, st.get("common_knowledge"))
         mk(Scene, st.get("scenes"))
+        mk(SceneParticipant, st.get("scene_participants"))
+        mk(SceneMessage, st.get("scene_messages"))
 
         # 3) 恢复世界与世界观标量字段
         world = await self._get(World, world_id)

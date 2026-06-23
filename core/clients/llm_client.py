@@ -42,6 +42,13 @@ class LLMClient:
     # ---- 世界导演：把世界推进一天（每日结算） ----
     async def keeper_direct_day(self, world_context, directive=""):
         return await self.keeper.direct_day(world_context, directive)
+
+    # ---- 真实模拟：开场景 + 每轮世界裁判 ----
+    async def keeper_open_scene(self, world_context, directive="", prev_summaries=None):
+        return await self.keeper.open_scene(world_context, directive, prev_summaries)
+
+    async def keeper_judge_round(self, world_context, scene_setting, round_dialogue, characters_state):
+        return await self.keeper.judge_round(world_context, scene_setting, round_dialogue, characters_state)
     
     async def start_new_chat(self):
         self.agent.start_new_turn()

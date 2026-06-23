@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from core.security.deps import get_request_user_id
+from modules.communication.simulation import SimulationService
 from modules.communication.world_service import WorldService
 
 router = APIRouter(prefix="/world", tags=["world"])
@@ -397,3 +398,28 @@ async def rollback_day(world_id: int, svc: WorldService = Depends()):
 @router.get("/{world_id}/can-rollback")
 async def can_rollback(world_id: int, svc: WorldService = Depends()):
     return {"can_rollback": await svc.has_snapshot(world_id)}
+
+
+# ================= 真实推演（演播室）=================
+class SimDirective(BaseModel):
+    directive: str | None = None
+
+@router.get("/{world_id}/sim/status")
+async def sim_status(world_id: int, svc: SimulationService = Depends()):
+    return await svc.status(world_id)
+
+@router.post("/{world_id}/sim/scene")
+async def sim_open_scene(world_id: int, req: SimDirective, svc: SimulationService = Depends()):
+    return await svc.open_scene(world_id, req.directive or "")
+
+@router.post("/{world_id}/sim/step")
+async def sim_step(world_id: int, req: SimDirective, svc: SimulationService = Depends()):
+    return await svc.step_round(world_id, req.directive or "")
+
+@router.post("/{world_id}/sim/run-day")
+async def sim_run_day(world_id: int, req: SimDirective, svc: SimulationService = Depends()):
+    return await svc.run_day(world_id, req.directive or "")
+
+@router.post("/{world_id}/sim/rollback-day")
+async def sim_rollback(world_id: int, svc: SimulationService = Depends()):
+    return await svc.rollback_day(world_id)

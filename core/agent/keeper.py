@@ -137,3 +137,65 @@ class KeeperAgent:
         data.setdefault("worldview_additions", {})
         data.setdefault("scene", {"should_switch": False})
         return data
+
+    async def open_scene(self, world_context: dict, directive: str = "", prev_summaries=None):
+        """世界导演：为当前这一天开启一个新场景（决定地点/情境/在场角色）。"""
+        chars = world_context.get("characters") or []
+        names = [c["name"] for c in chars]
+        char_lines = "\n".join(f"- {c['name']}：{c.get('summary') or ''}" for c in chars) or "-（无）"
+        prev = "\n".join(f"- {s}" for s in (prev_summaries or [])) or "-（这是今天第一幕）"
+        wv = world_context.get("worldview") or {}
+        sys = SystemMessage(content=(
+            "你是持久世界的「世界导演」。请为当前这一天开启一个新的场景（一幕戏）。"
+            "选择一个地点/情境，并挑选 2 个或以上在场角色，让剧情能自然展开。"
+            "只输出 JSON：{\"name\":\"场景名\",\"setting\":\"场景情境(一两句)\",\"participants\":[\"角色名\"]}"
+        ))
+        human = HumanMessage(content=(
+            f"【世界观】{wv.get('description') or ''}\n【背景(仅你可见)】{wv.get('background') or ''}\n"
+            f"【可用角色】\n{char_lines}\n【今天已发生的幕】\n{prev}\n"
+            f"【导演指示】{directive.strip() or '（无）'}\n请开启下一幕，输出 JSON。"
+        ))
+        try:
+            data = _parse_json(getattr(await self.llm.ainvoke([sys, human]), "content", "") or "")
+        except Exception:
+            data = {}
+        if not data.get("participants"):
+            data["participants"] = names[:3]
+        data.setdefault("name", "新场景")
+        data.setdefault("setting", "")
+        return data
+
+    async def judge_round(self, world_context, scene_setting, round_dialogue, characters_state):
+        """世界裁判：看完这一轮对话，输出每个在场角色的状态变化 + 本幕/本天是否结束。
+
+        characters_state: [{name, location, stats:{...}}]
+        返回 JSON：state_changes / relationship_changes / scene
+        """
+        cs_lines = "\n".join(
+            f"- {c['name']}：位置={c.get('location') or '未知'}，状态={c.get('stats') or {}}"
+            for c in characters_state) or "-（无）"
+        convo = "\n".join(f"{d['speaker']}：{d['content']}" for d in round_dialogue) or "（无对话）"
+        sys = SystemMessage(content=(
+            "你是持久世界的「世界裁判」。根据这一轮刚发生的对话，结算每个在场角色的状态变化，"
+            "要符合剧情因果、变化适度。可改：记忆、所在地点、获得/失去物品、数值(如 hp/mp/stamina 的增减)、"
+            "彼此关系、主观认知。并判断这一幕是否该结束、今天是否该结束。\n"
+            "只输出 JSON：\n"
+            '{"state_changes":[{"character":"名","memory":"新记住的(可选)","location":"新地点名(可选)",'
+            '"stat_deltas":{"hp":-10,"mp":-5}(可选,增减量),"items_gained":["物品"],"items_lost":["物品"],'
+            '"belief":"新认知(可选)"}],'
+            '"relationship_changes":[{"from":"名","to":"名","relation_type":"...","affinity":-100..100,"reason":"..."}],'
+            '"scene":{"should_end":false,"should_end_day":false,"reason":"..."}}\n'
+            "任何数组/字段都可省略或为空。stat_deltas 是增减量(负数表示减少)。"
+        ))
+        human = HumanMessage(content=(
+            f"【场景情境】{scene_setting or ''}\n【在场角色当前状态】\n{cs_lines}\n\n"
+            f"【这一轮对话】\n{convo}\n\n请结算状态变化，输出 JSON。"
+        ))
+        try:
+            data = _parse_json(getattr(await self.llm.ainvoke([sys, human]), "content", "") or "")
+        except Exception:
+            data = {}
+        data.setdefault("state_changes", [])
+        data.setdefault("relationship_changes", [])
+        data.setdefault("scene", {"should_end": False, "should_end_day": False})
+        return data

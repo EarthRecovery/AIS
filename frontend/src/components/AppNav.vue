@@ -30,6 +30,16 @@
         <n-icon size="17"><EarthOutline /></n-icon>
         <span>世界管理</span>
       </button>
+
+      <!-- 演播室：真实推演 -->
+      <button
+        class="tab"
+        :class="{ 'tab--active': route.path === '/studio' }"
+        @click="$router.push('/studio')"
+      >
+        <n-icon size="17"><PlanetOutline /></n-icon>
+        <span>演播室</span>
+      </button>
     </div>
 
     <div class="nav__right">
@@ -46,7 +56,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NIcon, NButton } from 'naive-ui'
 import {
-  ChatbubbleEllipsesOutline, EarthOutline, LogOutOutline,
+  ChatbubbleEllipsesOutline, EarthOutline, PlanetOutline, LogOutOutline,
 } from '@vicons/ionicons5'
 
 const route = useRoute()
