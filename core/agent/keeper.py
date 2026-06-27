@@ -12,6 +12,9 @@ import json
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
+from core.clients.llm_config import CHAT_MODEL
+from core.clients.llm_logger import get_llm_logger
+
 
 def _parse_json(text: str) -> dict:
     """容错解析 LLM 返回的 JSON（去掉可能的 ```json 包裹）。"""
@@ -48,7 +51,8 @@ def _parse_json_array(text: str) -> list:
 
 class KeeperAgent:
     def __init__(self):
-        self.llm = ChatOpenAI(model="gpt-4.1", temperature=0)
+        self.llm = ChatOpenAI(model=CHAT_MODEL, temperature=0,
+                              callbacks=[get_llm_logger()], tags=["keeper"])
 
     async def digest_scene(self, world_common, scene_setting, participants, transcript):
         """消化一个场景：产出每个在场角色的新记忆 + 场景切换决策。
@@ -184,6 +188,8 @@ class KeeperAgent:
         beat = world_context.get("beat")
         beat_block = (f"【当前剧本节拍】{beat.get('title','')}：{beat.get('goal','')}\n"
                       "让这一幕朝这个节拍推进。\n" if beat else "")
+        style = (world_context.get("style_guide") or "").strip()
+        style_block = (f"【参考文风】场景情境(setting)请模仿以下文风来写：\n{style}\n" if style else "")
 
         sys = SystemMessage(content=(
             "你是持久世界的「世界导演」。" + continuity +
@@ -195,7 +201,7 @@ class KeeperAgent:
         ))
         human = HumanMessage(content=(
             f"【世界观】{wv.get('description') or ''}\n【背景(仅你可见)】{wv.get('background') or ''}\n"
-            f"{beat_block}【可用角色】\n{char_lines}\n{prev_block}\n"
+            f"{beat_block}{style_block}【可用角色】\n{char_lines}\n{prev_block}\n"
             f"【导演指示】{directive.strip() or '（无）'}\n请输出场景 JSON。"
         ))
         try:
@@ -215,7 +221,11 @@ class KeeperAgent:
         sys = SystemMessage(content=(
             "你是角色的记忆整理者。把【已有长期记忆】和【一批较旧的零散记忆】合并成一段"
             "简洁、连贯的第一人称长期记忆/自我认知：保留关键事实、重要关系、目标、转折与"
-            "未了之事，去重并压缩，不要流水账。只输出这段文字本身，不要任何前后缀。"
+            "未了之事，去重并压缩，不要流水账。\n"
+            "【重要·防人格漂移】你只整合『经历与认知』(发生过什么、与谁有何恩怨、当前目标)，"
+            "绝不改写角色的性格、说话风格或价值观——那些由固定的角色设定决定，不归你管；"
+            "不要拔高、洗白或重新评判角色，只如实沉淀其经历。"
+            "只输出这段文字本身，不要任何前后缀。"
         ))
         human = HumanMessage(content=(
             f"角色：{char_name}\n【已有长期记忆】\n{self_summary or '（暂无）'}\n\n"
@@ -227,8 +237,8 @@ class KeeperAgent:
         except Exception:
             return self_summary or ""
 
-    async def write_outline(self, world_context, directive=""):
-        """编剧：根据世界观/任务，写一份多幕剧本大纲（节拍），指导长线推演。"""
+    def _outline_messages(self, world_context, directive=""):
+        """构造编剧写大纲的 system/human 消息（流式与非流式共用）。"""
         wv = world_context.get("worldview") or {}
         chars = "、".join(c["name"] for c in (world_context.get("characters") or [])) or "（待定）"
         sys = SystemMessage(content=(
@@ -241,8 +251,13 @@ class KeeperAgent:
             f"【完整背景(仅你可见)】{wv.get('background') or ''}\n【角色】{chars}\n"
             f"【额外要求】{directive.strip() or '（无）'}\n请输出大纲 JSON 数组。"
         ))
+        return sys, human
+
+    @staticmethod
+    def _beats_from_text(text):
+        """把 LLM 输出的 JSON 数组文本解析成干净的节拍列表。"""
         try:
-            data = _parse_json_array(getattr(await self.llm.ainvoke([sys, human]), "content", "") or "")
+            data = _parse_json_array(text or "")
         except Exception:
             data = []
         beats = []
@@ -251,32 +266,85 @@ class KeeperAgent:
                 beats.append({"title": b["title"], "goal": b.get("goal", "")})
         return beats
 
-    async def judge_round(self, world_context, scene_setting, round_dialogue, characters_state):
+    async def write_outline(self, world_context, directive=""):
+        """编剧：根据世界观/任务，写一份多幕剧本大纲（节拍），指导长线推演。"""
+        sys, human = self._outline_messages(world_context, directive)
+        try:
+            content = getattr(await self.llm.ainvoke([sys, human]), "content", "") or ""
+        except Exception:
+            content = ""
+        return self._beats_from_text(content)
+
+    async def write_outline_stream(self, world_context, directive=""):
+        """流式版编剧：逐 token 吐出大纲生成过程，最后 yield {"type":"done","beats":[...]}。"""
+        sys, human = self._outline_messages(world_context, directive)
+        text = ""
+        try:
+            async for chunk in self.llm.astream([sys, human]):
+                piece = getattr(chunk, "content", "") or ""
+                if piece:
+                    text += piece
+                    yield {"type": "token", "text": piece}
+        except Exception as e:
+            yield {"type": "error", "message": str(e) or "大纲生成失败"}
+        yield {"type": "done", "beats": self._beats_from_text(text)}
+
+    async def judge_round(self, world_context, scene_setting, round_dialogue, characters_state,
+                          script=None, round_index=0):
         """世界裁判：看完这一轮对话，输出每个在场角色的状态变化 + 本幕/本天是否结束。
 
         characters_state: [{name, location, stats:{...}}]
         返回 JSON：state_changes / relationship_changes / scene
         """
         cs_lines = "\n".join(
-            f"- {c['name']}：位置={c.get('location') or '未知'}，状态={c.get('stats') or {}}"
+            f"- {c['name']}（{c.get('status') or 'active'}）：位置={c.get('location') or '未知'}，"
+            f"当前状态={c.get('condition') or '正常'}，数值={c.get('stats') or {}}"
             for c in characters_state) or "-（无）"
-        convo = "\n".join(f"{d['speaker']}：{d['content']}" for d in round_dialogue) or "（无对话）"
+        convo_lines = []
+        for d in round_dialogue:
+            sp = d.get("speaker", "")
+            if d.get("say"):
+                convo_lines.append(f"{sp}：{d['say']}")
+            if d.get("do"):
+                convo_lines.append(f"（{sp} {d['do']}）")
+            if d.get("think"):
+                convo_lines.append(f"{sp}[心声·只有 ta 自己知道]：{d['think']}")
+            if "content" in d and not (d.get("say") or d.get("do") or d.get("think")):
+                convo_lines.append(f"{sp}：{d['content']}")   # 向后兼容旧结构
+        convo = "\n".join(convo_lines) or "（无对话）"
         beat = world_context.get("beat") if isinstance(world_context, dict) else None
+        script = script or (beat.get("script") if isinstance(beat, dict) else None)
         beat_block = (f"【当前剧本节拍】{beat.get('title','')}：{beat.get('goal','')}\n" if beat else "")
+        if script:
+            beat_block += f"【剧本 / 节奏（你要据此主动把控推进）】\n{script}\n"
+        beat_block += f"【本场景已进行】第 {round_index + 1} 轮\n"
         sys = SystemMessage(content=(
             "你是持久世界的「世界裁判」。根据这一轮刚发生的对话，结算每个在场角色的状态变化，"
             "要符合剧情因果、变化适度。每个角色可更新：记忆、所在地点、获得/失去物品、"
             "数值(如 hp/mp/stamina 的增减)、情绪(mood)、当前目标(goals)、动机(motivation)、"
-            "自我摘要(summary)、彼此关系、主观认知。并判断这一幕是否该结束、当前章节是否已达成。\n"
+            "自我摘要(summary)、显著状态(condition:一个词或短语)、彼此关系、主观认知。"
+            "并判断这一幕是否该结束、当前章节是否已达成。\n"
             "只输出 JSON：\n"
             '{"state_changes":[{"character":"名","memory":"新记住的(可选)","location":"新地点名(可选)",'
             '"stat_deltas":{"hp":-10,"mp":-5}(可选,增减量),"items_gained":["物品"],"items_lost":["物品"],'
             '"mood":"新情绪(可选)","goals":"新目标(可选)","motivation":"新动机(可选)",'
-            '"summary":"自我摘要的更新(可选,一两句)","belief":"新认知(可选)"}],'
+            '"summary":"自我摘要的更新(可选,一两句)","condition":"显著状态,一个词或短语,如 轻伤（手）(可选)",'
+            '"status":"生命周期(可选):被击杀/重伤退场时给 dead",'
+            '"belief":"新认知(可选)"}],'
             '"relationship_changes":[{"from":"名","to":"名","relation_type":"...","affinity":-100..100,"reason":"..."}],'
+            '"narration":"旁白(可选)：需要推动剧情时,你以世界视角写的一段简短旁白",'
             '"scene":{"should_end":false,"should_end_day":false,"beat_done":false,"reason":"..."}}\n'
             "任何数组/字段都可省略或为空。stat_deltas 是增减量(负数表示减少)。"
-            "只在剧情确实造成变化时才给对应字段；beat_done 表示当前章节目标是否已达成。"
+            "只在剧情确实造成变化时才给对应字段；"
+            "condition 表示角色当前最显著的身体/精神状态，仅用一个词或短语"
+            "(如『轻伤（手）』『中毒』『力竭』『冷静』)，状态被治愈/解除时给『正常』；"
+            "当角色 hp 归 0、或被决定性击杀 / 重伤无法再战时，给 status='dead'(该角色将退出场景)；"
+            "beat_done 表示当前章节目标是否已达成。\n"
+            "【主动掌控节奏】你不仅被动结算——要依据上面的【剧本 / 节奏】与【已进行轮数】主动推进剧情："
+            "若已多轮原地对峙、铺垫过久而剧本要求向前，就用 narration 写一段简短旁白(世界视角)直接促成关键事件"
+            "(决定性出手、补刀击杀、转折、外部变故)，并在 state_changes 里结算其后果(实质伤害，乃至 status='dead')，"
+            "绝不让场景空转；当剧本目标(如某一方被全灭)达成时，设 beat_done 与 should_end。"
+            "narration 只在需要推动剧情时给，且必须与 state_changes 的后果一致。"
         ))
         human = HumanMessage(content=(
             f"{beat_block}【场景情境】{scene_setting or ''}\n【在场角色当前状态】\n{cs_lines}\n\n"

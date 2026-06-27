@@ -11,6 +11,7 @@ from modules.auth.router import router as auth_router
 from modules.role.router import router as role_router
 from modules.communication.router import router as communication_router
 from modules.communication.world_router import router as world_router
+from modules.narrative.router import router as narrative_router
 from core.security.middleware import attach_user_from_token
 
 app = FastAPI(title="Aistoria 幻想物语")
@@ -54,3 +55,4 @@ app.include_router(auth_router)
 app.include_router(role_router)
 app.include_router(communication_router)
 app.include_router(world_router)
+app.include_router(narrative_router)

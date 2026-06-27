@@ -124,12 +124,15 @@ const handleSubmit = async () => {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
   background: radial-gradient(circle at 25% 20%, #1b1f3a, #0b0c14 40%), radial-gradient(circle at 80% 0%, #20456f, #0b0c14 38%), linear-gradient(135deg, #0a0c12 0%, #0f172a 100%);
   color: #f8fafc;
 }
 
 .auth-card {
   width: 440px;
+  max-width: 100%;
   background: #0f172a;
   color: #e2e8f0;
   box-shadow: 0 18px 70px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05);

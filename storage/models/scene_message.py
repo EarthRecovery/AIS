@@ -18,6 +18,8 @@ class SceneMessage(Base):
     speaker_role_id: Mapped[int] = mapped_column(Integer, nullable=True)
     speaker_name: Mapped[str] = mapped_column(String(50), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    # say(台词,默认) / do(动作,他人可感知) / think(心理,私有,仅本人+Keeper)
+    kind: Mapped[str] = mapped_column(String(10), nullable=False, default="say", server_default="say")
     timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

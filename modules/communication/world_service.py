@@ -312,12 +312,23 @@ class WorldService:
         def ser(m):
             return {"kind": m.kind, "content": m.content, "confidence": m.confidence}
 
+        # 该角色对他人的关系（决定盟友/敌人；用关系代替阵营）
+        rels = (await self.db.execute(select(Relationship).where(
+            Relationship.world_id == world_id,
+            Relationship.from_character_id == character_id))).scalars().all()
+        chars = await self._all(Character, world_id=world_id)
+        name_of = {c.id: c.name for c in chars}
+        rel_list = [{"to": name_of.get(r.to_character_id, f"#{r.to_character_id}"),
+                     "relation_type": r.relation_type, "affinity": r.affinity, "notes": r.notes}
+                    for r in rels]
+
         return {
             "common_knowledge": [c.content for c in commons],
             "self_summary": (mental.self_summary if mental else None),
             "short_term": [ser(m) for m in short],
             "long_term": [ser(m) for m in long],
             "scene_knowledge": [s.content for s in scene_k],
+            "relationships": rel_list,
         }
 
     async def character_detail(self, world_id, char_id):
@@ -336,7 +347,7 @@ class WorldService:
             Relationship.world_id == world_id, Relationship.from_character_id == char_id))).scalars().all()
         perc = await self.build_perception(world_id, char_id, None)
         return {
-            "id": c.id, "name": c.name, "status": c.status,
+            "id": c.id, "name": c.name, "status": c.status, "condition": c.condition,
             "location": loc.name if loc else None, "stats": c.stats or {},
             "mental": (None if ms is None else {
                 "mood": ms.mood, "goals": ms.goals, "motivation": ms.motivation,
@@ -385,7 +396,12 @@ class WorldService:
         msgs = (await self.db.execute(
             select(SceneMessage).where(SceneMessage.scene_id == scene_id)
             .order_by(SceneMessage.timestamp, SceneMessage.id))).scalars().all()
-        transcript = [{"speaker_name": m.speaker_name, "content": m.content} for m in msgs]
+        # 私有心理(think)不进 digest，避免被当成别人的记忆；动作(do)转为可见旁白
+        transcript = [
+            {"speaker_name": m.speaker_name,
+             "content": m.content if m.kind != "do" else f"（{m.speaker_name} {m.content}）"}
+            for m in msgs if m.kind != "think"
+        ]
 
         digest = await self.llm.keeper_digest(common, scene.scenario, participant_names, transcript)
 
@@ -573,6 +589,7 @@ class WorldService:
             "common_knowledge": commons, "recent_events": recent,
             "in_world_time": world.in_world_time if world else "",
             "beat": self._current_beat(world),
+            "style_guide": (world.style_guide or "") if world else "",
         }, world, wv, chars
 
     # ---- 剧本大纲 / 节拍 ----
@@ -583,6 +600,71 @@ class WorldService:
         if outline and 0 <= idx < len(outline):
             return outline[idx]
         return None
+
+    async def generate_world(self, user_id, prompt):
+        """一句话需求 → AI 生成完整世界(世界观/角色/关系/地点/物品/粗粒度里程碑)并落库。"""
+        from storage.models.worldview import Worldview
+        spec = await self.llm.world_build(prompt or "")
+        wvs = (spec or {}).get("worldview") or {}
+        if not wvs.get("description"):
+            return {"error": "生成失败，请换个描述再试"}
+        wv = await self._save(Worldview(
+            user_id=user_id, name=wvs.get("name") or "新世界",
+            description=wvs.get("description") or "", rules=wvs.get("rules") or "",
+            background=wvs.get("background") or ""))
+        world = await self.create_world(user_id, wvs.get("name") or "新世界", worldview_id=wv.id)
+        world.style_guide = spec.get("style_guide") or ""
+        await self.db.commit()
+        wid = world.id
+
+        name2id = {}
+        for c in (spec.get("characters") or [])[:8]:
+            nm = (c.get("name") or "").strip()
+            if not nm:
+                continue
+            ch = await self.create_character(wid, nm, stats=c.get("stats") or None)
+            if c.get("condition"):
+                ch.condition = c["condition"]
+                await self.db.commit()
+            name2id[nm] = ch.id
+            persona = (c.get("persona") or "").strip()
+            if persona:
+                await self.upsert_mental(ch.id, {"self_summary": persona})
+        for r in (spec.get("relationships") or []):
+            a = name2id.get((r.get("from") or "").strip())
+            b = name2id.get((r.get("to") or "").strip())
+            if a and b:
+                await self.create_relationship(wid, {
+                    "from_character_id": a, "to_character_id": b,
+                    "relation_type": r.get("relation_type"), "affinity": r.get("affinity"),
+                    "notes": r.get("notes")})
+        for loc in (spec.get("locations") or []):
+            if loc.get("name"):
+                await self.create_location(wid, {"name": loc["name"], "description": loc.get("description")})
+        for it in (spec.get("items") or []):
+            if it.get("name"):
+                owner = name2id.get((it.get("owner") or "").strip())
+                await self.create_item(wid, {"name": it["name"], "description": it.get("description"),
+                                             "owner_character_id": owner})
+        outline = []
+        for m in (spec.get("milestones") or []):
+            title = m.get("title") or "阶段"
+            if m.get("at_chapter"):
+                title = f"{title}（约第{m['at_chapter']}章）"
+            goal = "；".join(s for s in [
+                ("主要冲突：" + m["main_conflict"]) if m.get("main_conflict") else "",
+                ("角色处境：" + m["character_states"]) if m.get("character_states") else ""] if s)
+            outline.append({"title": title, "goal": goal})
+        if outline:
+            world.outline = outline
+            world.beat_index = 0
+        await self.db.commit()
+        await self.log_event(wid, "world_generated", f"AI 生成世界：{wv.name}",
+                             {"prompt": (prompt or "")[:200]})
+        return {"world_id": wid, "name": world.name,
+                "characters": list(name2id.keys()),
+                "locations": [loc.get("name") for loc in (spec.get("locations") or [])],
+                "milestones": [b["title"] for b in outline]}
 
     async def generate_outline(self, world_id, directive=""):
         ctx, world, _, _ = await self._director_context(world_id)
@@ -596,12 +678,64 @@ class WorldService:
                                  in_world_time=world.in_world_time)
         return beats
 
+    async def generate_outline_stream(self, world_id, directive=""):
+        """流式生成大纲：逐 token 吐出，结束后落库并 yield 最终 outline。"""
+        ctx, world, _, _ = await self._director_context(world_id)
+        beats = []
+        async for ev in self.llm.keeper_write_outline_stream(ctx, directive):
+            if ev.get("type") == "done":
+                beats = ev.get("beats") or []
+            else:
+                yield ev
+        if world is not None:
+            world.outline = beats
+            world.beat_index = 0
+            await self.db.commit()
+            await self.log_event(world_id, "outline_set", f"生成剧本大纲（{len(beats)} 章）",
+                                 {"beats": [b.get("title") for b in beats]},
+                                 in_world_time=world.in_world_time)
+        yield {"type": "done", "outline": beats}
+
+    async def _narrative_context(self, world_id):
+        """叙事 agent 的【隔离上下文】：只给计划层——世界设定 + 角色花名册(公开摘要+伤情/生死)
+        + 关系网 + 当前目标 + 故事梗概(已沉淀事件)。
+
+        与 Keeper 的区别：这里【不含】实时逐轮对话、角色私有心声(think)、每轮数值增减——
+        那些只在 judge_round 里传给 Keeper。叙事在「计划层」、Keeper 在「运行层」。
+        """
+        ctx, _, _, _ = await self._director_context(world_id)
+        return ctx
+
+    async def generate_script(self, world_id, directive=""):
+        """叙事/编剧 agent 为【当前节拍】生成『剧本 / 节奏』并写入 outline[beat_index].script。"""
+        ctx = await self._narrative_context(world_id)
+        script = await self.llm.narrative_write_script(ctx, directive)
+        world = await self._get(World, world_id)
+        if world is None:
+            return {"error": "世界不存在"}
+        outline = [dict(b) for b in (world.outline or []) if isinstance(b, dict)]
+        idx = world.beat_index or 0
+        if not outline:
+            outline = [{"title": "第一幕", "goal": directive or "", "script": script}]
+            idx = 0
+        else:
+            idx = min(idx, len(outline) - 1)
+            outline[idx]["script"] = script
+        world.outline = outline
+        world.beat_index = idx
+        await self.db.commit()
+        await self.log_event(world_id, "script_set",
+                             f"叙事生成本幕剧本节奏（第{idx + 1}章）", {"beat_index": idx},
+                             in_world_time=world.in_world_time)
+        return {"beat_index": idx, "script": script}
+
     async def update_outline(self, world_id, outline):
-        """用户编辑大纲：覆盖章节列表(每项 {title, goal})。"""
+        """用户编辑大纲：覆盖章节列表(每项 {title, goal, script?})。"""
         world = await self._get(World, world_id)
         if world is None:
             return None
-        clean = [{"title": b.get("title", ""), "goal": b.get("goal", "")}
+        clean = [{"title": b.get("title", ""), "goal": b.get("goal", ""),
+                  **({"script": b["script"]} if b.get("script") else {})}
                  for b in (outline or []) if isinstance(b, dict)]
         world.outline = clean
         if world.beat_index >= len(clean):
@@ -634,7 +768,16 @@ class WorldService:
         return None
 
     # ---- 记忆沉淀：把旧的零散记忆压进角色的长期自我认知 ----
-    async def consolidate_character(self, character_id, keep_scene_ids, threshold=8):
+    async def consolidate_character(self, character_id, keep_scene_ids,
+                                    max_chars=1500, min_count=4, force=False):
+        """把角色较旧的零散记忆压缩进 self_summary(长期自我认知)。
+
+        触发策略——兼顾「缓存稳定」与「抗人格漂移」：
+          - force=True（章节末）：只要有 ≥2 条可沉淀就压缩，把整章经历折进长期记忆。
+          - 否则（场景末安全阀）：仅当待沉淀记忆累计字数 ≥ max_chars 且条数 ≥ min_count 才压缩。
+            平时不动 self_summary → 让 prompt 稳定前缀整章命中缓存；
+            只在上下文真的变大时才压一次，且单次批量有上限 → 给单步人格漂移封顶。
+        """
         c = await self._get(Character, character_id)
         if c is None:
             return False
@@ -645,8 +788,12 @@ class WorldService:
         mems = res.scalars().all()
         keep = set(keep_scene_ids or [])
         older = [m for m in mems if (m.source_scene_id not in keep)]
-        if len(older) < threshold:
+        if len(older) < 2:
             return False
+        if not force:
+            total_chars = sum(len(m.content or "") for m in older)
+            if total_chars < max_chars or len(older) < min_count:
+                return False
         ms = await self.get_mental(character_id)
         cur_summary = ms.self_summary if ms else ""
         new_summary = await self.llm.keeper_consolidate(c.name, cur_summary, [m.content for m in older])
@@ -670,7 +817,7 @@ class WorldService:
 
     # 各表参与快照的字段（不含时间戳，回退时让其重置）
     _SNAP_FIELDS = {
-        "character": ["id", "world_id", "role_id", "name", "status", "current_location_id", "stats"],
+        "character": ["id", "world_id", "role_id", "name", "status", "condition", "current_location_id", "stats"],
         "mental_state": ["id", "character_id", "mood", "goals", "motivation", "self_summary"],
         "agent_memory": ["id", "world_id", "character_id", "kind", "content", "subject_type",
                          "subject_id", "confidence", "is_true", "source_scene_id", "importance"],

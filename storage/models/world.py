@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Integer, String, func
+from sqlalchemy import JSON, DateTime, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from storage.db import Base
@@ -28,6 +28,8 @@ class World(Base):
     outline: Mapped[list] = mapped_column(JSON, nullable=True)
     # 当前推进到第几个节拍(对应 outline 下标)
     beat_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 参考文风：用户为这个沙盘设定的叙事/对白风格，注入生成 context 指导文本风格
+    style_guide: Mapped[str] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

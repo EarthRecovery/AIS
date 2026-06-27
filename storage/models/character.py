@@ -22,6 +22,9 @@ class Character(Base):
     name: Mapped[str] = mapped_column(String(50), nullable=False)
     # active / away / dead / ...
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    # 叙事状态：由 Keeper 根据剧情推演注入的一个词/短语，如「轻伤（手）」「中毒」「力竭」。
+    # 与 status(生命周期)不同；空表示无显著状态。
+    condition: Mapped[str] = mapped_column(String(50), nullable=True)
     # 当前所在地点(ais_locations.id)
     current_location_id: Mapped[int] = mapped_column(Integer, nullable=True)
     # 数值状态（可扩展）：生命值/法力值/体力值等，模拟时每轮由世界裁判更新

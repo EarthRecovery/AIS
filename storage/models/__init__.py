@@ -17,3 +17,9 @@ from storage.models import (  # noqa: F401
     world_event,
     world_snapshot,
 )
+# STORY（叙事）层：故事蓝图 / 结局目标（自主导演 + 结局判定的根）
+from storage.models import story_blueprint  # noqa: F401
+# MANUSCRIPT（写作）层：章节成稿
+from storage.models import manuscript  # noqa: F401
+# 运维：每次 LLM 调用明细（管理员日志面板）
+from storage.models import llm_log  # noqa: F401

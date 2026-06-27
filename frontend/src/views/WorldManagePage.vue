@@ -2,8 +2,9 @@
   <div class="shell">
     <AppNav />
     <div class="body">
+      <div class="drawer-mask" v-show="drawerOpen" @click="drawerOpen = false"></div>
       <!-- 左侧：世界列表 -->
-      <div class="sidebar">
+      <div class="sidebar" :class="{ 'sidebar--open': drawerOpen }">
         <div class="section__header">
           <span class="section__title"><n-icon><EarthOutline /></n-icon> 我的世界</span>
           <n-button size="tiny" type="primary" @click="showCreate = true">
@@ -16,7 +17,7 @@
             :key="w.id"
             class="world-item"
             :class="{ 'world-item--active': w.id === store.worldId }"
-            @click="store.openWorld(w.id)"
+            @click="openWorldMobile(w.id)"
           >
             <div class="world-item__main">
               <div class="world-item__name">{{ w.name }}</div>
@@ -38,6 +39,10 @@
 
       <!-- 右侧：参数编辑 -->
       <div class="main">
+        <div class="m-bar mobile-only">
+          <button class="m-bar__btn" @click="drawerOpen = true" aria-label="菜单">☰</button>
+          <span class="m-bar__title">{{ store.world?.name || '世界管理' }}</span>
+        </div>
         <template v-if="store.worldId">
           <!-- 概览统计条：一眼看懂这个世界现在什么样 -->
           <div class="overview">
@@ -110,6 +115,8 @@ import TimelineTab from '@/components/world/TimelineTab.vue'
 
 const store = useWorldStore()
 const showCreate = ref(false)
+const drawerOpen = ref(false)   // 手机端侧栏抽屉
+const openWorldMobile = (id) => { store.openWorld(id); drawerOpen.value = false }
 const createForm = reactive({ name: '', worldview_id: null })
 const worldviewOptions = computed(() => store.worldviews.map((w) => ({ label: w.name, value: w.id })))
 
@@ -146,7 +153,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.shell { display: flex; flex-direction: column; height: 100vh; }
+.shell { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
 .body { flex: 1; display: flex; min-height: 0; }
 
 .sidebar {
@@ -206,4 +213,26 @@ onMounted(() => {
 .placeholder__title { color: var(--c-text-soft); font-size: 16px; font-weight: 600; }
 .placeholder__sub { color: var(--c-text-faint); font-size: 13px; }
 .footer { display: flex; justify-content: flex-end; gap: 12px; }
+
+/* 手机端顶栏（汉堡 + 标题） */
+.m-bar { display: none; align-items: center; gap: 10px; padding: 8px 12px;
+  background: var(--c-panel); border-bottom: 1px solid var(--c-border); flex: 0 0 auto; }
+.m-bar__btn { border: none; background: var(--c-primary-soft); color: var(--c-primary);
+  width: 34px; height: 34px; border-radius: 8px; font-size: 18px; cursor: pointer; flex: 0 0 auto; }
+.m-bar__title { font-weight: 600; font-size: 15px; color: var(--c-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drawer-mask { display: none; position: fixed; inset: var(--nav-h) 0 0 0; background: rgba(15,23,42,0.45); z-index: 29; }
+
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed; top: var(--nav-h); left: 0; bottom: 0; width: 84vw; max-width: 320px;
+    transform: translateX(-100%); transition: transform 0.25s ease; z-index: 30;
+    box-shadow: var(--shadow-md);
+  }
+  .sidebar--open { transform: translateX(0); }
+  .drawer-mask { display: block; }
+  .main { width: 100%; }
+  .overview { padding: 12px 16px 10px; }
+  .overview__title { font-size: 17px; }
+  .tabs { padding: 6px 12px 0; }
+}
 </style>

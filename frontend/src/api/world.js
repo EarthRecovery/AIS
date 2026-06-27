@@ -3,6 +3,8 @@ import request from '@/utils/request'
 // ---- World ----
 export const listWorlds = () => request.get('/world/list')
 export const createWorld = (payload) => request.post('/world/new', payload)
+// 一句话需求 → AI 生成完整世界（大 LLM 调用，放宽超时）
+export const generateWorld = (prompt) => request.post('/world/generate', { prompt }, { timeout: 180000 })
 export const getWorld = (id) => request.get(`/world/${id}`)
 export const updateWorld = (id, payload) => request.patch(`/world/${id}`, payload)
 export const deleteWorld = (id) => request.delete(`/world/${id}`)

@@ -2,8 +2,9 @@
   <div class="shell">
     <AppNav />
     <div class="body">
+      <div class="drawer-mask" v-show="drawerOpen" @click="drawerOpen = false"></div>
       <!-- 左侧：场景 / 世界观 -->
-      <div class="sidebar">
+      <div class="sidebar" :class="{ 'sidebar--open': drawerOpen }">
         <div class="section">
           <div class="section__header">
             <span class="section__title"><n-icon><BookOutline /></n-icon> 世界观</span>
@@ -30,7 +31,7 @@
               :key="r.id"
               class="room"
               :class="{ 'room--active': r.id === store.roomId }"
-              @click="store.openRoom(r.id)"
+              @click="openRoomMobile(r.id)"
             >
               <n-icon class="room__icon"><ChatbubblesOutline /></n-icon>
               <span class="room__name">{{ r.name }}</span>
@@ -48,6 +49,10 @@
 
       <!-- 右侧：群聊 -->
       <div class="main">
+        <div class="m-bar mobile-only">
+          <button class="m-bar__btn" @click="drawerOpen = true" aria-label="菜单">☰</button>
+          <span class="m-bar__title">{{ store.roomName || '多人对话' }}</span>
+        </div>
         <template v-if="store.roomId">
           <div class="room-header">
             <div class="room-header__row">
@@ -130,6 +135,8 @@ const message = ref('')
 const target = ref(null)
 const showWorldview = ref(false)
 const showRoom = ref(false)
+const drawerOpen = ref(false)   // 手机端侧栏抽屉
+const openRoomMobile = (id) => { store.openRoom(id); drawerOpen.value = false }
 
 const PALETTE = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#db2777', '#0891b2', '#65a30d']
 const color = (roleId) => PALETTE[Math.abs(Number(roleId) || 0) % PALETTE.length]
@@ -161,7 +168,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.shell { display: flex; flex-direction: column; height: 100vh; }
+.shell { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
 .body { flex: 1; display: flex; min-height: 0; }
 
 .sidebar {
@@ -226,4 +233,27 @@ onMounted(() => {
 .placeholder__icon { color: #c7cdd9; }
 .placeholder__title { color: var(--c-text-soft); font-size: 16px; font-weight: 600; }
 .placeholder__sub { color: var(--c-text-faint); font-size: 13px; }
+
+/* 手机端顶栏（汉堡 + 标题） */
+.m-bar { display: none; align-items: center; gap: 10px; padding: 8px 12px;
+  background: var(--c-panel); border-bottom: 1px solid var(--c-border); flex: 0 0 auto; }
+.m-bar__btn { border: none; background: var(--c-primary-soft); color: var(--c-primary);
+  width: 34px; height: 34px; border-radius: 8px; font-size: 18px; cursor: pointer; flex: 0 0 auto; }
+.m-bar__title { font-weight: 600; font-size: 15px; color: var(--c-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drawer-mask { display: none; position: fixed; inset: var(--nav-h) 0 0 0; background: rgba(15,23,42,0.45); z-index: 29; }
+
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed; top: var(--nav-h); left: 0; bottom: 0; width: 84vw; max-width: 320px;
+    transform: translateX(-100%); transition: transform 0.25s ease; z-index: 30;
+    box-shadow: var(--shadow-md);
+  }
+  .sidebar--open { transform: translateX(0); }
+  .drawer-mask { display: block; }
+  .main { width: 100%; }
+  .room-header { padding: 12px 16px; }
+  .input-bar { flex-wrap: wrap; padding: 10px 14px; gap: 8px; }
+  .target { flex: 1 1 100%; }
+  .input-bar :deep(.n-input) { flex: 1 1 100%; }
+}
 </style>

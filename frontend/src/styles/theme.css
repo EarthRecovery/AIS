@@ -35,3 +35,13 @@ html, body, #app {
 /* 通用工具类 */
 .u-faint { color: var(--c-text-faint); }
 .u-soft { color: var(--c-text-soft); }
+
+/* 响应式：手机端显隐工具（仅手机出现的元素默认隐藏，桌面元素手机隐藏） */
+.mobile-only { display: none !important; }
+@media (max-width: 768px) {
+  .mobile-only { display: flex !important; }
+  .desktop-only { display: none !important; }
+  /* naive-ui 弹层挂在 body 上，无法被页面 scoped 样式约束，这里全局限宽避免溢出 */
+  .n-drawer { max-width: 92vw !important; }
+  .n-card.n-modal, .n-modal .n-card { max-width: 94vw !important; }
+}

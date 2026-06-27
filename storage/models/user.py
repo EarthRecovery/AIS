@@ -12,3 +12,5 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(100), unique=True, nullable=True)
     phone_number: Mapped[str] = mapped_column(String(20), unique=True, nullable=True)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    # 角色：user（默认）/ admin / ... —— 权限按此判定
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="user", server_default="user")

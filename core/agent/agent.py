@@ -1,5 +1,8 @@
 from typing import List
 from langchain_openai import ChatOpenAI
+
+from core.clients.llm_config import CHAT_MODEL
+from core.clients.llm_logger import get_llm_logger
 from langchain_core.messages import (
     BaseMessage,
     SystemMessage,
@@ -19,8 +22,9 @@ class LLMAgent():
 
     def __init__(self):
         self.llm = ChatOpenAI(
-            model="gpt-4.1",
+            model=CHAT_MODEL,
             streaming=True,
+            callbacks=[get_llm_logger()], tags=["actor"],
         )
 
         # 「绑定了工具」的模型,以及 name -> tool 映射(执行工具时查表)。
@@ -150,7 +154,8 @@ class LLMAgent():
                 return HumanMessage(content=str(content))
             return SystemMessage(content=str(msg))
 
-        summary_llm = ChatOpenAI(model="gpt-4.1", temperature=0)
+        summary_llm = ChatOpenAI(model=CHAT_MODEL, temperature=0,
+                                 callbacks=[get_llm_logger()], tags=["summary"])
         summary_prompt = [
             SystemMessage(
                 content=(
@@ -167,25 +172,25 @@ class LLMAgent():
     # communication：多人格 + 共享世界观
     # ------------------------------------------------------------------
     @staticmethod
-    def _perception_block(self_name, perception) -> str:
-        """把某角色的感知视图(世界常识 + 私有记忆/认知 + 场景知识)渲染成提示。
+    def _fmt_mem(m) -> str:
+        tag = m.get("kind", "memory")
+        conf = m.get("confidence")
+        prefix = f"（{tag}{'，信心'+str(conf) if conf is not None else ''}）"
+        return f"- {prefix}{m.get('content','')}"
 
-        注意：只渲染 content/kind/置信度，绝不暴露 is_true(那是作者元信息)。
+    @staticmethod
+    def _perception_stable(self_name, perception) -> str:
+        """感知中的【稳定】部分：世界常识 + 自我认知(self_summary) + 长期记忆。
+
+        这些只在「记忆沉淀」时才变(章节边界)，放在 prompt 前部的稳定区，既能被
+        OpenAI 前缀缓存长期命中，又把"我是谁/我经历过什么"和人格锚点紧挨在一起、
+        强化身份一致性(抗人格漂移)。绝不渲染 is_true(作者元信息)。
         """
         if not perception:
             return ""
         commons = perception.get("common_knowledge") or []
         self_summary = perception.get("self_summary")
         long_term = perception.get("long_term") or []
-        short_term = perception.get("short_term") or []
-        scene_k = perception.get("scene_knowledge") or []
-
-        def fmt(m):
-            tag = m.get("kind", "memory")
-            conf = m.get("confidence")
-            prefix = f"（{tag}{'，信心'+str(conf) if conf is not None else ''}）"
-            return f"- {prefix}{m.get('content','')}"
-
         lines = [f"以下是「{self_name}」此刻所知道的一切——你只能依据这些信息行动，"
                  "不要使用你不可能知道的事，也不要读取其他角色的内心或私有记忆。"]
         if commons:
@@ -193,26 +198,56 @@ class LLMAgent():
         if self_summary:
             lines.append("【你的自我认知（长期）】\n" + self_summary)
         if long_term:
-            lines.append("【长期记忆（你印象深刻的事）】\n" + "\n".join(fmt(m) for m in long_term))
+            lines.append("【长期记忆（你印象深刻的事）】\n" + "\n".join(LLMAgent._fmt_mem(m) for m in long_term))
+        # 仅有引导句、无任何实质内容时返回空，避免占一条无意义的稳定消息
+        return "\n\n".join(lines) if len(lines) > 1 else ""
+
+    @staticmethod
+    def _perception_volatile(perception) -> str:
+        """感知中的【易变】部分：本场/近期短期记忆 + 当前场景已获知。
+
+        每轮裁判结算后会增长，放在 prompt 尾部(贴着对话记录)，不污染前面的稳定缓存前缀。
+        """
+        if not perception:
+            return ""
+        short_term = perception.get("short_term") or []
+        scene_k = perception.get("scene_knowledge") or []
+        relationships = perception.get("relationships") or []
+        lines = []
+        if relationships:
+            def _rel_line(r):
+                aff = r.get("affinity")
+                tag = ""
+                if isinstance(aff, (int, float)):
+                    tag = "（盟友/友好）" if aff >= 30 else ("（敌对）" if aff <= -30 else "（中立）")
+                base = f"- 对 {r['to']}：{r.get('relation_type') or '关系未定'}，好感{aff}{tag}"
+                return base + (f"｜{r['notes']}" if r.get("notes") else "")
+            lines.append("【你与他人的关系】（决定你与谁同心、与谁为敌——据此行动、站队）\n"
+                         + "\n".join(_rel_line(r) for r in relationships))
         if short_term:
-            lines.append("【近期记忆（最近几个场景发生的）】\n" + "\n".join(fmt(m) for m in short_term))
+            lines.append("【近期记忆（最近几个场景发生的）】\n" + "\n".join(LLMAgent._fmt_mem(m) for m in short_term))
         if scene_k:
             lines.append("【当前场景你已获知】\n" + "\n".join(f"- {s}" for s in scene_k))
         return "\n\n".join(lines)
 
     def _build_group_prompt(self, persona_settings, worldview_text, scenario, roster, transcript,
-                            perception=None):
+                            perception=None, allow_actions=False):
         """组装某个人格在多人房间里的发言 prompt。
 
-        复用 base_prompt + role_prompt.j2(已含 worldview/scenario 槽位)，
-        再叠加「在场角色名单」「只扮演本角色」的群聊规则，最后附上带发言者
-        标签的多人对话记录。共享世界观就是这里注入到每个人格 prompt 的同一段文本。
+        消息按「变化频率」从稳到易变排列，让 OpenAI 前缀缓存按 世界→角色→场景→轮次
+        逐级降级命中(OpenAI 不能手动标断点，顺序是唯一杠杆)：
+          1 base_prompt           全局静态
+          2 人格+世界观(不含场景)  世界/角色静态  ← 最大稳定块，整个世界生命周期可缓存
+          3 稳定感知              仅沉淀时变(章节边界)
+          4 群聊规则+在场名单      场景静态
+          5 当前场景 scenario      场景静态        ← 刻意从人格块里抽出，避免每开新戏就废掉 2
+          6 易变尾部(短期记忆+对话) 每轮动态
+        刻意【不】把 scenario 注入 persona：否则第 2 条(token 大头)每场景都变，缓存退化到场景级。
         """
         persona = dict(persona_settings or {})
         if worldview_text:
             persona["worldview"] = worldview_text
-        if scenario:
-            persona["scenario"] = scenario
+        persona.pop("scenario", None)  # 场景情境改放到靠后的独立消息(见下)，保持人格块跨场景字节一致
         self_name = persona.get("name") or "你"
 
         roster_lines = "\n".join(
@@ -242,34 +277,46 @@ class LLMAgent():
             )
 
         msgs: List[BaseMessage] = [
-            base_prompt_run(),
-            SystemMessage(content=load_role_prompt(persona)),
-            SystemMessage(content=rules),
+            base_prompt_run(),                                # 1 全局静态
+            SystemMessage(content=load_role_prompt(persona)),  # 2 人格+世界观(无场景)：最大稳定块
         ]
-        perception_text = self._perception_block(self_name, perception)
-        if perception_text:
-            msgs.append(SystemMessage(content=perception_text))
+        stable = self._perception_stable(self_name, perception)
+        if stable:
+            msgs.append(SystemMessage(content=stable))         # 3 稳定感知(身份区)
+        msgs.append(SystemMessage(content=rules))              # 4 群聊规则+名单
+        if allow_actions:                                      # 4.5 可选动作/心理通道(世界推演)
+            msgs.append(SystemMessage(content=(
+                "【动作与心理 · 按需】平时你只需要说话。但务必注意以下两点：\n"
+                "- 当你这一回合有**肢体动作**（出手/挥砍/格挡/移动/夺取/逃离等），**必须**用 §动作§ 写出来，"
+                "【绝不要把动作描写写进台词里】——台词(say)只放你说出口的话,不要在台词里描写自己的动作。\n"
+                "- 当你有**不说出口、却会影响你之后行为的盘算/算计**（欺骗、试探、隐藏意图、伺机而动），用 §心理§ 写。\n"
+                "格式：在发言【最后】各自另起一行，以 §动作§ / §心理§ 开头（没有就不要出现该标记）：\n"
+                "§动作§ 简短的肢体动作\n"
+                "§心理§ 私密的心理盘算\n"
+                "安静对话的回合通常两者都没有；**打斗/对峙/有算计的回合往往会有动作或心理,该用就用。**"
+            )))
+        if scenario:
+            msgs.append(SystemMessage(content=f"【当前场景】\n{scenario}"))  # 5 场景静态
+
+        # 6 易变尾部：短期记忆 + 当前场景知识 + 对话记录，全部贴在最后
+        volatile = self._perception_volatile(perception)
+        head = (volatile + "\n\n") if volatile else ""
         if transcript:
             lines = "\n".join(f"{t['speaker_name']}：{t['content']}" for t in transcript)
-            msgs.append(
-                HumanMessage(
-                    content=f"【已发生的对话】\n{lines}\n\n请以「{self_name}」的身份接着说："
-                )
-            )
+            tail = f"{head}【已发生的对话】\n{lines}\n\n请以「{self_name}」的身份接着说："
         else:
-            msgs.append(
-                HumanMessage(
-                    content=f"现在由你「{self_name}」开场，依据世界观与当前场景说出第一句话。"
-                )
-            )
+            tail = f"{head}现在由你「{self_name}」开场，依据世界观与当前场景说出第一句话。"
+        msgs.append(HumanMessage(content=tail))
         return msgs
 
     async def get_group_response_astream(
-        self, persona_settings, worldview_text, scenario, roster, transcript, perception=None
+        self, persona_settings, worldview_text, scenario, roster, transcript, perception=None,
+        allow_actions=False,
     ):
         """某个人格在房间里的流式发言（群聊不走工具循环，保持轻量）。"""
         work = self._build_group_prompt(
-            persona_settings, worldview_text, scenario, roster, transcript, perception
+            persona_settings, worldview_text, scenario, roster, transcript, perception,
+            allow_actions=allow_actions,
         )
         async for chunk in self.llm.astream(work):
             if chunk.content:
@@ -285,7 +332,8 @@ class LLMAgent():
 
         tail = transcript[-12:] if transcript else []
         convo = "\n".join(f"{t['speaker_name']}：{t['content']}" for t in tail) or "（暂无对话，需要有人开场）"
-        director = ChatOpenAI(model="gpt-4.1", temperature=0)
+        director = ChatOpenAI(model=CHAT_MODEL, temperature=0,
+                              callbacks=[get_llm_logger()], tags=["speaker_pick"])
         msgs = [
             SystemMessage(
                 content=(

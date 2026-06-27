@@ -123,7 +123,7 @@ class CommunicationService:
 
     async def add_message(
         self, room_id: int, speaker_type: str, speaker_name: str, content: str,
-        speaker_role_id: Optional[int] = None,
+        speaker_role_id: Optional[int] = None, kind: str = "say",
     ) -> SceneMessage:
         msg = SceneMessage(
             scene_id=room_id,
@@ -131,6 +131,7 @@ class CommunicationService:
             speaker_role_id=speaker_role_id,
             speaker_name=speaker_name,
             content=content,
+            kind=kind,
         )
         self.db.add(msg)
         await self.db.commit()

@@ -3,6 +3,8 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import InMemoryVectorStore
 from langchain_anthropic import ChatAnthropic
 from core.rag_engine.models.vectorStore import VectorStore
+from core.clients.llm_logger import get_llm_logger
+from core.clients.llm_config import CHAT_MODEL
 
 # OpenAIModel 是一个封装了 OpenAI 相关模型的类，提供聊天模型、嵌入模型和向量存储模型的初始化和访问方法。
 # openai_model: 聊天生成模型，用于处理对话和生成文本响应。
@@ -22,9 +24,10 @@ class OpenAIModel:
             collection_name="default_collection",
         )
 
-    def get_openai_model(self,model: str = "gpt-4.1"):
+    def get_openai_model(self, model: str = CHAT_MODEL):
         if self.openai_chat_model is None:
-            self.openai_chat_model = ChatOpenAI(model=model, temperature=0)
+            self.openai_chat_model = ChatOpenAI(model=model, temperature=0,
+                                                callbacks=[get_llm_logger()], tags=["rag"])
         return self.openai_chat_model
     
     def get_anthropic_model(self, model: str = "claude-3-5-sonnet-20241022"):

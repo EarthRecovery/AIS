@@ -1,11 +1,23 @@
 <template>
   <div class="cc">
+    <!-- 状态栏：由 Keeper 根据剧情推演注入的叙事状态（一个词/短语） -->
+    <div class="statusbar">
+      <span class="statusbar__label">状态</span>
+      <span class="statusbar__pill" :class="{ 'statusbar__pill--on': !!basic.condition }">
+        {{ basic.condition || '正常' }}
+      </span>
+    </div>
+
     <!-- 基本属性 -->
     <n-form label-placement="left" label-width="80" class="block">
       <div class="block__title">基本</div>
       <n-form-item label="名称"><n-input v-model:value="basic.name" /></n-form-item>
       <n-form-item label="状态">
         <n-select v-model:value="basic.status" :options="statusOptions" />
+      </n-form-item>
+      <n-form-item label="当前状态">
+        <n-input v-model:value="basic.condition"
+          placeholder="如 轻伤（手）；由 Keeper 推演注入，也可手动改" />
       </n-form-item>
       <n-form-item label="所在地点">
         <n-select v-model:value="basic.current_location_id" :options="store.locationOptions" clearable />
@@ -77,7 +89,7 @@ const statusOptions = [
   { label: 'dead 死亡', value: 'dead' },
 ]
 
-const basic = reactive({ name: '', status: 'active', current_location_id: null })
+const basic = reactive({ name: '', status: 'active', condition: '', current_location_id: null })
 const mental = reactive({ mood: '', goals: '', motivation: '', self_summary: '' })
 const newAbility = reactive({ name: '', level: 1 })
 const newBelief = reactive({ content: '', confidence: 50 })
@@ -87,6 +99,7 @@ watch(
   (b) => {
     Object.assign(basic, {
       name: b.character.name, status: b.character.status,
+      condition: b.character.condition || '',
       current_location_id: b.character.current_location_id,
     })
     Object.assign(mental, {
@@ -127,4 +140,10 @@ const addBelief = () =>
 .row { display: flex; gap: 10px; }
 .line, .belief { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
 .t { font-size: 12px; color: #64748b; }
+.statusbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px; }
+.statusbar__label { font-size: 12px; color: #94a3b8; }
+.statusbar__pill { font-size: 13px; font-weight: 600; padding: 2px 12px; border-radius: 999px;
+  background: #eef2f7; color: #64748b; }
+.statusbar__pill--on { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
 </style>
